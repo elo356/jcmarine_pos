@@ -1,0 +1,77 @@
+{
+  "name": "pos-app",
+  "version": "1.0.0",
+  "private": true,
+  "main": "electron/main.js",
+  "dependencies": {
+    "clsx": "^2.0.0",
+    "date-fns": "^3.0.0",
+    "firebase": "^12.10.0",
+    "lucide-react": "^0.294.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "tailwind-merge": "^2.1.0"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "npm run build:web",
+    "build:web": "react-scripts build",
+    "build:desktop": "cross-env PUBLIC_URL=./ react-scripts build",
+    "electron:dev": "concurrently \"cross-env BROWSER=none npm start\" \"wait-on http://localhost:3000 && cross-env ELECTRON_START_URL=http://localhost:3000 electron .\"",
+    "electron:build": "npm run build:desktop && electron-builder",
+    "electron:build:win": "npm run build:desktop && electron-builder --win nsis",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "build": {
+    "appId": "com.cjmarine.pos",
+    "productName": "CJ Marine POS",
+    "directories": {
+      "buildResources": "public"
+    },
+    "files": [
+      "build/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "${productName} Setup ${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^9.2.1",
+    "cross-env": "^7.0.3",
+    "electron": "^37.2.6",
+    "electron-builder": "^26.0.12",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.4.0",
+    "wait-on": "^8.0.3"
+  }
+}
