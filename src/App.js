@@ -172,11 +172,11 @@ function App() {
       </div>
 
       <aside
-        className={`fixed lg:sticky lg:top-0 inset-y-0 left-0 z-40 w-64 lg:h-screen lg:flex-shrink-0 bg-gradient-to-b from-primary-600 to-primary-800 text-white transform transition-transform duration-300 ease-in-out ${
+        className={`fixed top-16 bottom-0 left-0 lg:sticky lg:top-0 lg:inset-y-0 z-40 w-[min(18rem,85vw)] lg:w-64 h-[calc(100vh-4rem)] lg:h-screen lg:flex-shrink-0 bg-gradient-to-b from-primary-600 to-primary-800 text-white transform transition-transform duration-300 ease-in-out flex flex-col ${
           mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
-        <div className="p-6 border-b border-primary-500">
+        <div className="hidden lg:block p-6 border-b border-primary-500">
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <img
               src="/logo3-removebg-preview.png"
@@ -187,7 +187,7 @@ function App() {
           </h1>
         </div>
 
-        <nav className="mt-6 px-4">
+        <nav className="flex-1 overflow-y-auto px-4 py-4 lg:mt-6">
           {visibleItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.id;
@@ -212,14 +212,14 @@ function App() {
           })}
         </nav>
 
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-primary-500">
+        <div className="mt-auto p-4 border-t border-primary-500 bg-black/10">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-10 h-10 bg-primary-500 rounded-full flex items-center justify-center">
               <User size={20} />
             </div>
-            <div>
-              <p className="font-medium">{profile?.name || user.email}</p>
-              <p className="text-xs text-primary-200">{profile?.email || user.email}</p>
+            <div className="min-w-0">
+              <p className="font-medium truncate">{profile?.name || user.email}</p>
+              <p className="text-xs text-primary-200 truncate">{profile?.email || user.email}</p>
               <p className="text-xs text-primary-200 capitalize">{profile?.role || 'cashier'}</p>
             </div>
           </div>
