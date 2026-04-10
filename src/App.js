@@ -11,6 +11,7 @@ import {
   Printer,
   ClipboardList,
   ShieldCheck,
+  Settings as SettingsIcon,
   Menu,
   X,
   LogOut,
@@ -27,6 +28,7 @@ import Reports from './pages/Reports';
 import Printers from './pages/Printers';
 import SpecialOrders from './pages/SpecialOrders';
 import RolesPermissions from './pages/RolesPermissions';
+import Settings from './pages/Settings';
 import Login from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
 import { startSessionPresence } from './services/systemPresenceService';
@@ -45,6 +47,7 @@ const SIDEBAR_ITEMS = [
   { id: 'employees', label: 'Empleados', icon: Users },
   { id: 'reports', label: 'Reportes', icon: BarChart3 },
   { id: 'printers', label: 'Impresoras', icon: Printer },
+  { id: 'settings', label: 'Configuracion', icon: SettingsIcon },
   { id: 'manage_roles', label: 'Roles y permisos', icon: ShieldCheck, adminOnly: true }
 ];
 
@@ -53,6 +56,7 @@ function App() {
   const { resolveRoleDefinition } = useRoleDefinitions();
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [pendingProductDraft, setPendingProductDraft] = useState(null);
   const activeSystemsCount = useActiveSystemsCount(profile?.role === 'admin');
 
@@ -130,6 +134,8 @@ function App() {
         return <Reports />;
       case 'printers':
         return <Printers />;
+      case 'settings':
+        return <Settings />;
       case 'manage_roles':
         return <RolesPermissions />;
       default:
@@ -172,19 +178,31 @@ function App() {
       </div>
 
       <aside
-        className={`fixed top-16 bottom-0 left-0 lg:sticky lg:top-0 lg:inset-y-0 z-40 w-[min(18rem,85vw)] lg:w-64 h-[calc(100vh-4rem)] lg:h-screen lg:flex-shrink-0 bg-gradient-to-b from-primary-600 to-primary-800 text-white transform transition-transform duration-300 ease-in-out flex flex-col ${
-          mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        className={`fixed top-16 bottom-0 left-0 lg:sticky lg:top-0 lg:inset-y-0 z-40 w-[min(18rem,85vw)] h-[calc(100vh-4rem)] lg:h-screen lg:flex-shrink-0 bg-gradient-to-b from-primary-600 to-primary-800 text-white transform transition-all duration-300 ease-in-out flex flex-col overflow-hidden ${
+          mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+        } ${
+          desktopSidebarOpen
+            ? 'lg:translate-x-0 lg:w-64 lg:opacity-100'
+            : 'lg:-translate-x-full lg:w-0 lg:opacity-0 lg:pointer-events-none'
         }`}
       >
-        <div className="hidden lg:block p-6 border-b border-primary-500">
-          <h1 className="text-2xl font-bold flex items-center gap-2">
+        <div className="hidden lg:flex items-center p-6 border-b border-primary-500 gap-3">
+          <h1 className="text-2xl font-bold flex items-center gap-2 flex-1 min-w-0">
             <img
               src="/logo3-removebg-preview.png"
               alt="CJ Marine"
-              className="h-14 w-14 object-contain"
+              className="h-14 w-14 object-contain flex-shrink-0"
             />
-            <span>CJ Marine</span>
+            <span className="whitespace-nowrap">CJ Marine</span>
           </h1>
+          <button
+            type="button"
+            onClick={() => setDesktopSidebarOpen(false)}
+            className="p-2 rounded-lg hover:bg-white/10 transition-colors flex-shrink-0"
+            aria-label="Esconder menu lateral"
+          >
+            <X size={20} />
+          </button>
         </div>
 
         <nav className="flex-1 overflow-y-auto px-4 py-4 lg:mt-6">
@@ -244,16 +262,26 @@ function App() {
         <div className="pt-16 lg:pt-0">
           <header className="bg-white shadow-sm px-6 py-4 sticky top-0 z-20 hidden lg:block">
             <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-800">{currentPageTitle}</h2>
-                <p className="text-sm text-gray-500">
-                  {new Date().toLocaleDateString('es-ES', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                  })}
-                </p>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDesktopSidebarOpen((open) => !open)}
+                  className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  aria-label={desktopSidebarOpen ? 'Esconder menu lateral' : 'Mostrar menu lateral'}
+                >
+                  <Menu size={22} />
+                </button>
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-800">{currentPageTitle}</h2>
+                  <p className="text-sm text-gray-500">
+                    {new Date().toLocaleDateString('es-ES', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    })}
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-4">
                 {profile?.role === 'admin' && (

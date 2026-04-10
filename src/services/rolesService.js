@@ -45,9 +45,13 @@ const mergeWithDefaults = (remoteRoles = []) => {
   remoteRoles.forEach((role) => {
     const normalized = normalizeRoleDefinition(role);
     if (!normalized.id) return;
+    const fallback = merged.get(normalized.id);
     merged.set(normalized.id, {
-      ...merged.get(normalized.id),
-      ...normalized
+      ...fallback,
+      ...normalized,
+      permissions: fallback?.system
+        ? normalizePermissions([...(fallback.permissions || []), ...(normalized.permissions || [])])
+        : normalized.permissions
     });
   });
 

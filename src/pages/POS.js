@@ -898,7 +898,8 @@ function POS({
         html: buildSalePrintHtml({
           sale: lastSale,
           documentType,
-          printerName: assignedPrinter?.name || ''
+          printerName: assignedPrinter?.name || '',
+          storeConfig: storeInfo
         }),
         printer: assignedPrinter
       });
