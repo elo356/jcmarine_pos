@@ -64,6 +64,10 @@ export const buildTransactionRecord = ({
       selectedSize: item.selectedSize || '',
       price: item.price,
       subtotal: item.price * item.quantity,
+      discountType: item.discount?.type || 'percentage',
+      discountValue: Number(item.discount?.value || 0),
+      discountAmount: Number(item.pricing?.discountAmount || 0),
+      taxableSubtotal: Number(item.pricing?.taxableSubtotal || (item.price * item.quantity)),
       ivuStateEnabled: item.ivuStateEnabled !== false,
       ivuMunicipalEnabled: item.ivuMunicipalEnabled !== false
     })),

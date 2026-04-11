@@ -8,7 +8,6 @@ const TERMINAL_ID_KEY = 'pos:terminal-id';
 
 export const DEFAULT_SHARED_POS_CART = {
   items: [],
-  discount: { type: 'percentage', value: 0 },
   meta: null
 };
 
@@ -30,6 +29,7 @@ const normalizeCartItem = (item = {}) => {
     cartKey: item.cartKey || `${item.id || 'item'}::${item.selectedSize || 'no-size'}`,
     selectedSize: item.selectedSize || '',
     linkedProductIds: Array.isArray(item.linkedProductIds) ? item.linkedProductIds : [],
+    discount: normalizeDiscount(item.discount),
     quantity
   };
 };
@@ -45,14 +45,12 @@ export const normalizeSharedPosCart = (raw = {}) => ({
   items: Array.isArray(raw?.items)
     ? raw.items.map(normalizeCartItem).filter((item) => item.id && item.quantity > 0)
     : [],
-  discount: normalizeDiscount(raw?.discount),
   meta: normalizeMeta(raw?.meta || raw)
 });
 
 export const serializeSharedPosCartState = (state = DEFAULT_SHARED_POS_CART) =>
   JSON.stringify({
-    items: normalizeSharedPosCart(state).items,
-    discount: normalizeSharedPosCart(state).discount
+    items: normalizeSharedPosCart(state).items
   });
 
 export const getPersistentTerminalId = () => {
@@ -87,9 +85,8 @@ const saveSharedPosCartCache = (state) => {
 
 const sharedPosCartRef = doc(db, POS_CARTS_COLLECTION, SHARED_POS_CART_ID);
 
-const buildCartPayload = ({ items, discount, updatedBy }) => ({
+const buildCartPayload = ({ items, updatedBy }) => ({
   items: normalizeSharedPosCart({ items }).items,
-  discount: normalizeDiscount(discount),
   terminalId: updatedBy?.terminalId || getPersistentTerminalId(),
   updatedByName: updatedBy?.name || '',
   updatedByUid: updatedBy?.uid || '',
@@ -118,10 +115,9 @@ export const subscribeSharedPosCart = (onData, onError) => {
   );
 };
 
-export const saveSharedPosCart = async ({ items, discount, updatedBy }) => {
+export const saveSharedPosCart = async ({ items, updatedBy }) => {
   const optimisticState = normalizeSharedPosCart({
     items,
-    discount,
     meta: {
       terminalId: updatedBy?.terminalId || getPersistentTerminalId(),
       updatedByName: updatedBy?.name || '',
@@ -131,13 +127,12 @@ export const saveSharedPosCart = async ({ items, discount, updatedBy }) => {
   });
 
   saveSharedPosCartCache(optimisticState);
-  await setDoc(sharedPosCartRef, buildCartPayload({ items, discount, updatedBy }), { merge: true });
+  await setDoc(sharedPosCartRef, buildCartPayload({ items, updatedBy }), { merge: true });
 };
 
 export const clearSharedPosCart = async (updatedBy) => {
   await saveSharedPosCart({
     items: [],
-    discount: DEFAULT_SHARED_POS_CART.discount,
     updatedBy
   });
 };

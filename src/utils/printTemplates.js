@@ -114,8 +114,8 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
         <tbody>
           ${sale.items.map((item) => `
             <tr>
-              <td>${item.name}${item.quantity > 1 ? ` x${formatQuantity(item.quantity, item.unitType)}` : ''}</td>
-              <td>${formatCurrency(item.subtotal)}</td>
+              <td>${item.name}${item.quantity > 1 ? ` x${formatQuantity(item.quantity, item.unitType)}` : ''}${item.discountAmount > 0 ? ` <span class="muted">(Desc. ${formatCurrency(item.discountAmount)})</span>` : ''}</td>
+              <td>${formatCurrency(item.taxableSubtotal || item.subtotal)}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -124,6 +124,7 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
 
     <div class="totals">
       <div class="row"><span>Subtotal</span><strong>${formatCurrency(sale.subtotal)}</strong></div>
+      ${sale.discount > 0 ? `<div class="row"><span>Descuentos</span><strong>-${formatCurrency(sale.discount)}</strong></div>` : ''}
       <div class="row"><span>IVU municipal</span><strong>${formatCurrency(sale.taxBreakdown?.municipal || 0)}</strong></div>
       <div class="row"><span>IVU estatal</span><strong>${formatCurrency(sale.taxBreakdown?.state || 0)}</strong></div>
       <div class="row"><span>Total</span><strong>${formatCurrency(sale.total)}</strong></div>
@@ -195,6 +196,56 @@ export const buildSpecialOrderPrintHtml = ({ order, printerName = '' }) => {
   `;
 
   return basePrintDocument({ title: `Pedido ${order.orderNumber}`, body });
+};
+
+export const buildStoreClosurePrintHtml = ({ summary, printerName = '' }) => {
+  const body = `
+    ${buildStoreHeader({
+      employeeLabel: 'Cierre',
+      employeeValue: `Shift #${summary.shiftNumber}`,
+      printerName
+    })}
+
+    ${dottedDivider}
+
+    <div class="section">
+      <div class="row"><span>Abrió</span><strong>${summary.openedByName}</strong></div>
+      <div class="row"><span>Hora apertura</span><strong>${formatDateTime(summary.openedAt)}</strong></div>
+      <div class="row"><span>Cerró</span><strong>${summary.closedByName}</strong></div>
+      <div class="row"><span>Hora cierre</span><strong>${formatDateTime(summary.closeTime)}</strong></div>
+    </div>
+
+    ${dottedDivider}
+
+    <div class="section">
+      <h3 style="margin-bottom:8px;">Cash Drawer</h3>
+      <div class="row"><span>Starting Cash</span><strong>${formatCurrency(summary.startingCash)}</strong></div>
+      <div class="row"><span>Cash Payments</span><strong>${formatCurrency(summary.cashPayments)}</strong></div>
+      <div class="row"><span>Cash Refunds</span><strong>${formatCurrency(summary.cashRefunds)}</strong></div>
+      <div class="row"><span>Paid In</span><strong>${formatCurrency(summary.paidIn)}</strong></div>
+      <div class="row"><span>Paid Out</span><strong>${formatCurrency(summary.paidOut)}</strong></div>
+      <div class="row"><span>Expected Cash Amount</span><strong>${formatCurrency(summary.expectedCashAmount)}</strong></div>
+      <div class="row"><span>Actual Cash Amount</span><strong>${formatCurrency(summary.actualCashAmount)}</strong></div>
+      <div class="row"><span>Difference</span><strong>${formatCurrency(summary.difference)}</strong></div>
+    </div>
+
+    ${dottedDivider}
+
+    <div class="section">
+      <h3 style="margin-bottom:8px;">Sales Summary</h3>
+      <div class="row"><span>Gross Sales</span><strong>${formatCurrency(summary.grossSales)}</strong></div>
+      <div class="row"><span>Refunds</span><strong>${formatCurrency(summary.refunds)}</strong></div>
+      <div class="row"><span>Discounts</span><strong>${formatCurrency(summary.discounts)}</strong></div>
+      <div class="row"><span>Net Sales</span><strong>${formatCurrency(summary.netSales)}</strong></div>
+      <div class="row"><span>Taxes</span><strong>${formatCurrency(summary.taxes)}</strong></div>
+      <div class="row"><span>Total Tendered</span><strong>${formatCurrency(summary.totalTendered)}</strong></div>
+      <div class="row"><span>Cash</span><strong>${formatCurrency(summary.tenders.cash)}</strong></div>
+      <div class="row"><span>ATH Móvil</span><strong>${formatCurrency(summary.tenders.athMovil)}</strong></div>
+      <div class="row"><span>Tarjeta</span><strong>${formatCurrency(summary.tenders.card)}</strong></div>
+    </div>
+  `;
+
+  return basePrintDocument({ title: `Cierre tienda ${summary.shiftNumber}`, body });
 };
 
 export const buildPrinterTestHtml = ({ printer }) => basePrintDocument({

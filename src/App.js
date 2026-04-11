@@ -6,6 +6,7 @@ import {
   DollarSign,
   Warehouse,
   Clock,
+  Store,
   Users,
   BarChart3,
   Printer,
@@ -22,6 +23,7 @@ import Products from './pages/Products';
 import Sales from './pages/Sales';
 import Inventory from './pages/Inventory';
 import Shifts from './pages/Shifts';
+import StorePage from './pages/Store';
 import Employees from './pages/Employees';
 import Reports from './pages/Reports';
 import Printers from './pages/Printers';
@@ -42,6 +44,7 @@ const SIDEBAR_ITEMS = [
   { id: 'special_orders', label: 'Pedidos especiales', icon: ClipboardList },
   { id: 'inventory', label: 'Inventario', icon: Warehouse },
   { id: 'shifts', label: 'Turnos', icon: Clock },
+  { id: 'store', label: 'Tienda', icon: Store },
   { id: 'employees', label: 'Empleados', icon: Users },
   { id: 'reports', label: 'Reportes', icon: BarChart3 },
   { id: 'printers', label: 'Impresoras', icon: Printer },
@@ -63,12 +66,20 @@ function App() {
   }, [profile?.role, resolveRoleDefinition]);
 
   const visibleItems = useMemo(
-    () => SIDEBAR_ITEMS.filter((item) => allowedPages.includes(item.id) && (!item.adminOnly || profile?.role === 'admin')),
+    () => SIDEBAR_ITEMS.filter((item) => {
+      const hasAccess = item.id === 'store'
+        ? allowedPages.includes('store') || allowedPages.includes('shifts')
+        : allowedPages.includes(item.id);
+      return hasAccess && (!item.adminOnly || profile?.role === 'admin');
+    }),
     [allowedPages, profile?.role]
   );
 
   useEffect(() => {
-    if (!allowedPages.includes(currentPage)) {
+    const hasAccessToCurrentPage = currentPage === 'store'
+      ? allowedPages.includes('store') || allowedPages.includes('shifts')
+      : allowedPages.includes(currentPage);
+    if (!hasAccessToCurrentPage) {
       setCurrentPage(allowedPages[0] || 'dashboard');
     }
   }, [allowedPages, currentPage]);
@@ -125,6 +136,8 @@ function App() {
         return <Inventory />;
       case 'shifts':
         return <Shifts />;
+      case 'store':
+        return <StorePage />;
       case 'employees':
         return <Employees />;
       case 'reports':

@@ -41,6 +41,36 @@ import { printHtmlDocument } from '../services/printService';
 const IVU_STATE_RATE = 0.105;
 const IVU_MUNICIPAL_RATE = 0.01;
 const SHARED_CART_SYNC_DEBOUNCE_MS = 250;
+const DEFAULT_ITEM_DISCOUNT = { type: 'percentage', value: 0 };
+
+const normalizeItemDiscount = (discount = {}) => ({
+  type: discount?.type === 'fixed' ? 'fixed' : 'percentage',
+  value: Math.max(0, Number.isFinite(Number(discount?.value)) ? Number(discount.value) : 0)
+});
+
+const calculateItemPricing = (item) => {
+  const quantity = Number(item.quantity || 0);
+  const subtotal = Number(item.price || 0) * quantity;
+  const discount = normalizeItemDiscount(item.discount);
+  const rawDiscountAmount = discount.type === 'percentage'
+    ? subtotal * (discount.value / 100)
+    : discount.value;
+  const discountAmount = Math.min(Math.max(rawDiscountAmount, 0), subtotal);
+  const taxableSubtotal = subtotal - discountAmount;
+  const stateTax = item.ivuStateEnabled !== false ? taxableSubtotal * IVU_STATE_RATE : 0;
+  const municipalTax = item.ivuMunicipalEnabled !== false ? taxableSubtotal * IVU_MUNICIPAL_RATE : 0;
+
+  return {
+    subtotal,
+    discount,
+    discountAmount,
+    taxableSubtotal,
+    stateTax,
+    municipalTax,
+    totalTax: stateTax + municipalTax,
+    total: taxableSubtotal + stateTax + municipalTax
+  };
+};
 
 function POS({
   onCreateProductFromBarcode = () => {},
@@ -61,7 +91,6 @@ function POS({
   const [cashReceived, setCashReceived] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-  const [discount, setDiscount] = useState({ type: 'percentage', value: 0 });
   const [cartSyncStatus, setCartSyncStatus] = useState('connecting');
   const [sharedCartMeta, setSharedCartMeta] = useState(DEFAULT_SHARED_POS_CART.meta);
   const [productsPage, setProductsPage] = useState(1);
@@ -160,7 +189,6 @@ function POS({
         lastSharedCartSignatureRef.current = signature;
         sharedCartReadyRef.current = true;
         setCart(state.items);
-        setDiscount(state.discount);
         setSharedCartMeta(state.meta);
         setCartSyncStatus(meta.fromCache ? 'offline' : 'synced');
       },
@@ -181,7 +209,7 @@ function POS({
   useEffect(() => {
     if (!sharedCartReadyRef.current) return undefined;
 
-    const localSignature = serializeSharedPosCartState({ items: cart, discount });
+    const localSignature = serializeSharedPosCartState({ items: cart });
     if (localSignature === lastSharedCartSignatureRef.current) return undefined;
 
     if (sharedCartSyncTimerRef.current) {
@@ -191,7 +219,6 @@ function POS({
     sharedCartSyncTimerRef.current = setTimeout(() => {
       saveSharedPosCart({
         items: cart,
-        discount,
         updatedBy: sharedCartEditor
       })
         .then(() => {
@@ -210,7 +237,7 @@ function POS({
         sharedCartSyncTimerRef.current = null;
       }
     };
-  }, [cart, discount, sharedCartEditor]);
+  }, [cart, sharedCartEditor]);
 
   const buildAdjacencyMap = (items) => {
     const adjacency = new Map(items.map((p) => [p.id, new Set()]));
@@ -360,7 +387,8 @@ function POS({
           ...product,
           cartKey,
           selectedSize,
-          quantity: normalizedQuantity
+          quantity: normalizedQuantity,
+          discount: DEFAULT_ITEM_DISCOUNT
         }
       ];
     });
@@ -425,30 +453,37 @@ function POS({
 
   const clearCart = () => {
     setCart([]);
-    updateDiscount(DEFAULT_SHARED_POS_CART.discount);
   };
 
-  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const rawDiscountAmount = discount.type === 'percentage'
-    ? subtotal * (discount.value / 100)
-    : discount.value;
-  const discountAmount = Math.min(Math.max(rawDiscountAmount, 0), subtotal);
-  const discountRatio = subtotal > 0 ? discountAmount / subtotal : 0;
-  const taxSummary = cart.reduce(
-    (summary, item) => {
-      const itemSubtotal = item.price * item.quantity;
-      const discountedSubtotal = itemSubtotal - (itemSubtotal * discountRatio);
-      const stateTax = item.ivuStateEnabled !== false ? discountedSubtotal * IVU_STATE_RATE : 0;
-      const municipalTax = item.ivuMunicipalEnabled !== false ? discountedSubtotal * IVU_MUNICIPAL_RATE : 0;
+  const updateItemDiscount = (cartKey, field, value) => {
+    setCart((prevCart) =>
+      prevCart.map((item) => {
+        if (item.cartKey !== cartKey) return item;
+        return {
+          ...item,
+          discount: normalizeItemDiscount({
+            ...item.discount,
+            [field]: value
+          })
+        };
+      })
+    );
+  };
 
-      return {
-        state: summary.state + stateTax,
-        municipal: summary.municipal + municipalTax
-      };
-    },
+  const cartPricing = useMemo(
+    () => cart.map((item) => ({ ...item, pricing: calculateItemPricing(item) })),
+    [cart]
+  );
+  const subtotal = cartPricing.reduce((sum, item) => sum + item.pricing.subtotal, 0);
+  const discountAmount = cartPricing.reduce((sum, item) => sum + item.pricing.discountAmount, 0);
+  const taxableAmount = cartPricing.reduce((sum, item) => sum + item.pricing.taxableSubtotal, 0);
+  const taxSummary = cartPricing.reduce(
+    (summary, item) => ({
+      state: summary.state + item.pricing.stateTax,
+      municipal: summary.municipal + item.pricing.municipalTax
+    }),
     { state: 0, municipal: 0 }
   );
-  const taxableAmount = subtotal - discountAmount;
   const tax = taxSummary.state + taxSummary.municipal;
   const total = taxableAmount + tax;
 
@@ -457,13 +492,6 @@ function POS({
   };
 
   showNotificationRef.current = showNotification;
-
-  const updateDiscount = (nextDiscount) => {
-    setDiscount({
-      type: nextDiscount?.type === 'fixed' ? 'fixed' : 'percentage',
-      value: Number.isFinite(Number(nextDiscount?.value)) ? Number(nextDiscount.value) : 0
-    });
-  };
 
   const resetPaymentState = useCallback(() => {
     setSelectedPaymentMethod('');
@@ -698,7 +726,7 @@ function POS({
     const cashierId = user?.uid || data.currentUser.id;
     const sale = buildTransactionRecord({
       saleId,
-      cart,
+      cart: cartPricing,
       subtotal,
       discountAmount,
       tax,
@@ -767,7 +795,6 @@ function POS({
 
       setLastSale(sale);
       setCart([]);
-      updateDiscount(DEFAULT_SHARED_POS_CART.discount);
       setShowPaymentModal(false);
       setShowReceiptModal(true);
       setSelectedPrintDocument('receipt');
@@ -1094,7 +1121,7 @@ function POS({
               <>
                 {/* Cart Items */}
                 <div className="space-y-3 max-h-64 overflow-y-auto mb-4">
-                  {cart.map((item) => (
+                  {cartPricing.map((item) => (
                     <div key={item.cartKey} className="rounded-lg bg-gray-50 p-3">
                       <div className="flex items-start gap-3">
                         <div className="min-w-0 flex-1">
@@ -1149,34 +1176,34 @@ function POS({
                             <Plus size={14} />
                           </button>
                         </div>
-                        <p className="shrink-0 text-right text-sm font-bold">
-                          {formatCurrency(item.price * item.quantity)}
-                        </p>
+                        <div className="shrink-0 text-right text-sm">
+                          {item.pricing.discountAmount > 0 && (
+                            <p className="text-green-600">Desc. -{formatCurrency(item.pricing.discountAmount)}</p>
+                          )}
+                          <p className="font-bold">{formatCurrency(item.pricing.taxableSubtotal)}</p>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex min-w-0 items-center gap-2">
+                        <select
+                          value={item.discount?.type || DEFAULT_ITEM_DISCOUNT.type}
+                          onChange={(e) => updateItemDiscount(item.cartKey, 'type', e.target.value)}
+                          className="input w-16 shrink-0 text-sm"
+                        >
+                          <option value="percentage">%</option>
+                          <option value="fixed">$</option>
+                        </select>
+                        <input
+                          type="number"
+                          value={item.discount?.value ?? 0}
+                          onChange={(e) => updateItemDiscount(item.cartKey, 'value', e.target.value)}
+                          placeholder="Descuento por producto"
+                          className="input min-w-0 flex-1"
+                          min="0"
+                          step="0.01"
+                        />
                       </div>
                     </div>
                   ))}
-                </div>
-
-                {/* Discount */}
-                <div className="border-t pt-4 mb-4">
-                  <div className="flex min-w-0 items-center gap-2 mb-2">
-                    <select
-                      value={discount.type}
-                      onChange={(e) => updateDiscount({ ...discount, type: e.target.value })}
-                      className="input w-16 shrink-0 text-sm"
-                    >
-                      <option value="percentage">%</option>
-                      <option value="fixed">$</option>
-                    </select>
-                    <input
-                      type="number"
-                      value={discount.value}
-                      onChange={(e) => updateDiscount({ ...discount, value: Number(e.target.value) })}
-                      placeholder="Descuento"
-                      className="input min-w-0 flex-1"
-                      min="0"
-                    />
-                  </div>
                 </div>
 
                 {/* Totals */}
@@ -1675,9 +1702,14 @@ function POS({
                 <tbody>
                   {lastSale.items.map((item, index) => (
                     <tr key={index} className="border-b">
-                      <td className="py-2">{item.name}</td>
+                      <td className="py-2">
+                        <div>{item.name}</div>
+                        {item.discountAmount > 0 && (
+                          <div className="text-xs text-green-600">Desc. -{formatCurrency(item.discountAmount)}</div>
+                        )}
+                      </td>
                       <td className="text-center py-2">{formatQuantity(item.quantity, item.unitType)}</td>
-                      <td className="text-right py-2">{formatCurrency(item.subtotal)}</td>
+                      <td className="text-right py-2">{formatCurrency(item.taxableSubtotal || item.subtotal)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1691,7 +1723,7 @@ function POS({
               </div>
               {lastSale.discount > 0 && (
                 <div className="flex justify-between text-green-600">
-                  <span>Descuento:</span>
+                  <span>Descuentos:</span>
                   <span>-{formatCurrency(lastSale.discount)}</span>
                 </div>
               )}
