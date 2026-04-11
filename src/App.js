@@ -11,7 +11,6 @@ import {
   Printer,
   ClipboardList,
   ShieldCheck,
-  Settings as SettingsIcon,
   Menu,
   X,
   LogOut,
@@ -28,7 +27,6 @@ import Reports from './pages/Reports';
 import Printers from './pages/Printers';
 import SpecialOrders from './pages/SpecialOrders';
 import RolesPermissions from './pages/RolesPermissions';
-import Settings from './pages/Settings';
 import Login from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
 import { startSessionPresence } from './services/systemPresenceService';
@@ -47,7 +45,6 @@ const SIDEBAR_ITEMS = [
   { id: 'employees', label: 'Empleados', icon: Users },
   { id: 'reports', label: 'Reportes', icon: BarChart3 },
   { id: 'printers', label: 'Impresoras', icon: Printer },
-  { id: 'settings', label: 'Configuracion', icon: SettingsIcon },
   { id: 'manage_roles', label: 'Roles y permisos', icon: ShieldCheck, adminOnly: true }
 ];
 
@@ -134,8 +131,6 @@ function App() {
         return <Reports />;
       case 'printers':
         return <Printers />;
-      case 'settings':
-        return <Settings />;
       case 'manage_roles':
         return <RolesPermissions />;
       default:

@@ -28,29 +28,12 @@ export const normalizeProductTaxConfig = (product = {}) => ({
 export const normalizePrintSettings = (data = {}) => {
   const printers = Array.isArray(data.printers) ? data.printers : [];
   const printRouting = data.printRouting || {};
-  const documentBranding = data.documentBranding || {};
-
-  const buildDocumentBranding = (type, fallbackSubtitle) => {
-    const current = documentBranding[type] || {};
-
-    return {
-      title: current.title || data.name || 'CJ Marine',
-      subtitle: current.subtitle || fallbackSubtitle,
-      headerLines: current.headerLines || [data.address, data.cityStateZip, data.phone].filter(Boolean).join('\n'),
-      footerText: current.footerText || 'Piezas y accesorios despachados correctamente no tienen devolucion. Se aceptan cambios dentro de los primeros 7 dias de la compra con recibo y empaque original.',
-      logoUrl: current.logoUrl || ''
-    };
-  };
 
   return {
     printers,
     printRouting: {
       receiptPrinterId: printRouting.receiptPrinterId || printers[1]?.id || printers[0]?.id || '',
       invoicePrinterId: printRouting.invoicePrinterId || printers[0]?.id || ''
-    },
-    documentBranding: {
-      receipt: buildDocumentBranding('receipt', 'Recibo oficial'),
-      invoice: buildDocumentBranding('invoice', 'Factura oficial')
     }
   };
 };
@@ -97,22 +80,6 @@ export const initialData = {
     printRouting: {
       receiptPrinterId: 'printer_002',
       invoicePrinterId: 'printer_001'
-    },
-    documentBranding: {
-      receipt: {
-        title: 'CJ Marine',
-        subtitle: 'Recibo oficial',
-        headerLines: 'Carr 111 km 05\nAguadilla 00603\n939 200 8820',
-        footerText: 'Piezas y accesorios despachados correctamente no tienen devolucion. Se aceptan cambios dentro de los primeros 7 dias de la compra con recibo y empaque original.',
-        logoUrl: ''
-      },
-      invoice: {
-        title: 'CJ Marine',
-        subtitle: 'Factura oficial',
-        headerLines: 'Carr 111 km 05\nAguadilla 00603\n939 200 8820',
-        footerText: 'Piezas y accesorios despachados correctamente no tienen devolucion. Se aceptan cambios dentro de los primeros 7 dias de la compra con recibo y empaque original.',
-        logoUrl: ''
-      }
     }
   },
   

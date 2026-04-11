@@ -1,6 +1,16 @@
 import React from 'react';
 
-const Select = ({ label, value, onChange, options, placeholder = 'Seleccionar...', required = false, error, disabled = false }) => {
+const Select = ({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder = 'Seleccionar...',
+  required = false,
+  error,
+  disabled = false,
+  ...props
+}) => {
   return (
     <div className="mb-4">
       {label && (
@@ -15,6 +25,7 @@ const Select = ({ label, value, onChange, options, placeholder = 'Seleccionar...
         required={required}
         disabled={disabled}
         className={`input w-full ${error ? 'border-red-500 focus:ring-red-500' : ''} ${disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+        {...props}
       >
         <option value="">{placeholder}</option>
         {options.map((option) => (

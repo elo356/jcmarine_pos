@@ -43,8 +43,7 @@ function SpecialOrderDetailModal({
       title: `Pedido ${order.orderNumber}`,
       html: buildSpecialOrderPrintHtml({
         order,
-        printerName,
-        storeConfig: store
+        printerName
       }),
       printer
     });

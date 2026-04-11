@@ -9,7 +9,6 @@ export const MODULE_PERMISSION_OPTIONS = [
   { id: 'employees', label: 'Empleados' },
   { id: 'reports', label: 'Reportes' },
   { id: 'printers', label: 'Impresoras' },
-  { id: 'settings', label: 'Configuracion' },
   { id: 'manage_categories', label: 'Gestionar categorias' },
   { id: 'manage_employees', label: 'Gestionar empleados' },
   { id: 'manage_roles', label: 'Roles y permisos' }
@@ -37,7 +36,6 @@ export const DEFAULT_ROLE_DEFINITIONS = [
       'shifts',
       'reports',
       'printers',
-      'settings',
       'manage_categories'
     ],
     system: true
@@ -68,6 +66,5 @@ export const PAGE_PERMISSION_IDS = [
   'employees',
   'reports',
   'printers',
-  'settings',
   'manage_roles'
 ];

@@ -1,4 +1,4 @@
-import { formatCurrency, formatDateTime, formatQuantity, normalizePrintSettings } from '../data/demoData';
+import { formatCurrency, formatDateTime, formatQuantity } from '../data/demoData';
 import { getPaymentMethodLabel } from './paymentUtils';
 
 const basePrintDocument = ({ title, body }) => `
@@ -70,27 +70,19 @@ const basePrintDocument = ({ title, body }) => `
   </html>
 `;
 
-const escapeHtml = (value) => String(value || '')
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;')
-  .replace(/'/g, '&#39;');
-
-const formatMultilineText = (value) => escapeHtml(value).replace(/\n/g, '<br />');
-
-const buildStoreHeader = ({ employeeLabel, employeeValue, printerName = '', branding }) => `
+const buildStoreHeader = ({ employeeLabel, employeeValue, printerName = '' }) => `
   <div class="header" style="text-align:center;">
     <img
-      src="${branding.logoUrl || `${window.location.origin}/logo3-removebg-preview.png`}"
-      alt="${escapeHtml(branding.title)}"
+      src="${window.location.origin}/logo3-removebg-preview.png"
+      alt="CJ Marine"
       style="width:88px;height:auto;display:block;margin:0 auto 8px;"
     />
-    <h1 style="font-size:22px;">${escapeHtml(branding.title)}</h1>
-    ${branding.subtitle ? `<p class="muted" style="margin-top:6px;">${escapeHtml(branding.subtitle)}</p>` : ''}
-    ${branding.headerLines ? `<p class="muted" style="margin-top:6px;line-height:1.45;">${formatMultilineText(branding.headerLines)}</p>` : ''}
-    ${employeeValue ? `<p class="muted" style="margin-top:8px;">${escapeHtml(employeeLabel)}: ${escapeHtml(employeeValue)}</p>` : ''}
-    ${printerName ? `<p class="muted">Destino: ${escapeHtml(printerName)}</p>` : ''}
+    <h1 style="font-size:22px;">CJ Marine</h1>
+    <p class="muted" style="margin-top:6px;">Carr 111 km 05</p>
+    <p class="muted">Aguadilla 00603</p>
+    <p class="muted">939 200 8820</p>
+    ${employeeValue ? `<p class="muted" style="margin-top:8px;">${employeeLabel}: ${employeeValue}</p>` : ''}
+    ${printerName ? `<p class="muted">Destino: ${printerName}</p>` : ''}
   </div>
 `;
 
@@ -100,16 +92,13 @@ const dottedDivider = `
   </div>
 `;
 
-export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName = '', storeConfig = {} }) => {
-  const branding = normalizePrintSettings(storeConfig || {}).documentBranding?.[documentType]
-    || normalizePrintSettings({}).documentBranding[documentType];
+export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName = '' }) => {
   const title = documentType === 'invoice' ? `Factura ${sale.id}` : `Recibo ${sale.id}`;
   const body = `
     ${buildStoreHeader({
       employeeLabel: 'Empleado',
       employeeValue: sale.cashier,
-      printerName,
-      branding
+      printerName
     })}
 
     ${dottedDivider}
@@ -145,7 +134,9 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
     ${dottedDivider}
 
     <div class="footer">
-      <p style="font-size:12px;line-height:1.45;">${formatMultilineText(branding.footerText)}</p>
+      <p style="font-size:12px;line-height:1.45;">
+        Piezas y accesorios despachados correctamente no tienen devolucion. Se aceptan cambios dentro de los primeros 7 dias de la compra con recibo y empaque original.
+      </p>
       <p class="muted" style="margin-top:12px;">Fecha: ${formatDateTime(sale.date)}</p>
       <p class="muted">Venta: ${sale.id}</p>
       <p class="muted">${documentType === 'invoice' ? 'Factura' : 'Recibo'}</p>
@@ -155,15 +146,12 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
   return basePrintDocument({ title, body });
 };
 
-export const buildSpecialOrderPrintHtml = ({ order, printerName = '', storeConfig = {} }) => {
-  const branding = normalizePrintSettings(storeConfig || {}).documentBranding?.receipt
-    || normalizePrintSettings({}).documentBranding.receipt;
+export const buildSpecialOrderPrintHtml = ({ order, printerName = '' }) => {
   const body = `
     ${buildStoreHeader({
       employeeLabel: 'Cliente',
       employeeValue: order.customerName,
-      printerName,
-      branding
+      printerName
     })}
 
     ${dottedDivider}
@@ -197,7 +185,9 @@ export const buildSpecialOrderPrintHtml = ({ order, printerName = '', storeConfi
     ${dottedDivider}
 
     <div class="footer">
-      <p style="font-size:12px;line-height:1.45;">${formatMultilineText(branding.footerText)}</p>
+      <p style="font-size:12px;line-height:1.45;">
+        Piezas y accesorios despachados correctamente no tienen devolucion. Se aceptan cambios dentro de los primeros 7 dias de la compra con recibo y empaque original.
+      </p>
       <p class="muted" style="margin-top:12px;">Fecha: ${formatDateTime(order.createdAt)}</p>
       <p class="muted">Pedido: ${order.orderNumber}</p>
       <p class="muted">Teléfono: ${order.customerPhone || '-'}</p>
