@@ -1,7 +1,7 @@
 const getReceiptApiBaseUrl = () => {
   const configuredUrl = process.env.REACT_APP_RECEIPTS_API_URL;
   if (configuredUrl) return configuredUrl.replace(/\/$/, '');
-  return 'http://localhost:4001';
+  return '';
 };
 
 export const sendReceiptEmail = async (payload) => {
