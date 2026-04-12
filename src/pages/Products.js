@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { Plus, Edit2, Trash2, Search, Package, AlertTriangle, Barcode } from 'lucide-react';
+import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import {
   loadData,
   formatCurrency,
@@ -16,6 +17,7 @@ import { saveProductsSnapshot, subscribeProducts } from '../services/inventorySe
 import { normalizeHeader, parseCsv } from '../utils/csv';
 import { deleteCategory, saveCategory, subscribeCategories } from '../services/categoryService';
 import { useAuth } from '../contexts/AuthContext';
+import { auth } from '../firebase/config';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useRoleDefinitions } from '../hooks/useRoleDefinitions';
 import useIsMobileDevice from '../hooks/useIsMobileDevice';
@@ -23,9 +25,10 @@ import useScannerHidStatus from '../hooks/useScannerHidStatus';
 import useScannerKeyboardInput from '../hooks/useScannerKeyboardInput';
 
 function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const { hasPermission } = useRoleDefinitions();
   const canManageCategories = hasPermission(profile?.role, 'manage_categories') || profile?.role === 'admin';
+  const canDeleteAllProducts = profile?.role === 'admin';
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,6 +45,9 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedLinkedProductId, setExpandedLinkedProductId] = useState('');
   const [showBarcodeScannerModal, setShowBarcodeScannerModal] = useState(false);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [deleteAllPassword, setDeleteAllPassword] = useState('');
+  const [deletingAll, setDeletingAll] = useState(false);
   const [scannerStatus, setScannerStatus] = useState('Listo para escanear');
   const [scannerError, setScannerError] = useState('');
   const [manualBarcode, setManualBarcode] = useState('');
@@ -77,6 +83,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     sku: '',
     name: '',
     barcode: '',
+    location: '',
     categoryId: '',
     price: '',
     cost: '',
@@ -169,6 +176,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sku: template.sku || '',
         name: template.name || '',
         barcode: template.barcode || '',
+        location: template.location || '',
         categoryId: template.categoryId || '',
         price: template.price !== undefined ? String(template.price) : '',
         cost: template.cost !== undefined ? String(template.cost) : '',
@@ -196,6 +204,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       sku: '',
       name: '',
       barcode: pendingDraft.barcode,
+      location: '',
       categoryId: '',
       price: '',
       cost: '',
@@ -243,7 +252,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
           (product.sku || '').toLowerCase().includes(query) ||
           product.name.toLowerCase().includes(query) ||
           product.barcode.includes(debouncedSearchQuery) ||
-          (product.description || '').toLowerCase().includes(query)
+          (product.description || '').toLowerCase().includes(query) ||
+          (product.location || '').toLowerCase().includes(query)
         )
         .map((product) => product.id)
     );
@@ -437,6 +447,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sku: product.sku || '',
         name: product.name,
         barcode: product.barcode,
+        location: product.location || '',
         categoryId: product.categoryId,
         price: product.price.toString(),
         cost: product.cost.toString(),
@@ -457,6 +468,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sku: '',
         name: '',
         barcode: '',
+        location: '',
         categoryId: '',
         price: '',
         cost: '',
@@ -482,6 +494,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       sku: '',
       name: '',
       barcode: '',
+      location: '',
       categoryId: '',
       price: '',
       cost: '',
@@ -556,6 +569,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
             sku: normalizedSku,
             name: formData.name,
             barcode: formData.barcode,
+            location: (formData.location || '').trim().toUpperCase(),
             categoryId: formData.categoryId,
             category: category?.name || '',
             price: parseFloat(formData.price),
@@ -605,6 +619,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sku: normalizedSku,
         name: formData.name,
         barcode: formData.barcode,
+        location: (formData.location || '').trim().toUpperCase(),
         categoryId: formData.categoryId,
         category: category?.name || '',
         price: parseFloat(formData.price),
@@ -790,15 +805,37 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   };
 
   const handleDeleteAllProducts = async () => {
+    if (!canDeleteAllProducts) {
+      showNotification('error', 'Solo los administradores pueden borrar todo el inventario.');
+      return;
+    }
+
     if (products.length === 0) {
       showNotification('error', 'No hay productos para borrar');
       return;
     }
 
-    const confirmed = window.confirm(
-      'Esto borrará todos los productos del sistema. Esta acción no se puede deshacer. ¿Continuar?'
-    );
-    if (!confirmed) return;
+    if (!user?.email) {
+      showNotification('error', 'No se pudo validar la cuenta del administrador actual.');
+      return;
+    }
+
+    if (!deleteAllPassword) {
+      showNotification('error', 'Debes escribir tu contraseña para confirmar.');
+      return;
+    }
+
+    setDeletingAll(true);
+
+    try {
+      const credential = EmailAuthProvider.credential(user.email, deleteAllPassword);
+      await reauthenticateWithCredential(auth.currentUser || user, credential);
+    } catch (error) {
+      console.error('Error reauthenticating admin before deleting all products:', error);
+      setDeletingAll(false);
+      showNotification('error', 'La contraseña es incorrecta. No se borró el inventario.');
+      return;
+    }
 
     const deletedIds = products.map((p) => p.id);
     setProducts([]);
@@ -809,6 +846,9 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       products: []
     });
     showNotification('success', 'Se borraron todos los productos');
+    setShowDeleteAllModal(false);
+    setDeleteAllPassword('');
+    setDeletingAll(false);
 
     saveProductsSnapshot([], deletedIds).catch((error) => {
       console.error(error);
@@ -849,6 +889,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sku: findColumn(['sku', 'id', 'codigointerno', 'codigo', 'referencia']),
         name: findColumn(['nombre', 'name', 'producto', 'product']),
         barcode: findColumn(['barcode', 'codigobarras', 'ean', 'upc']),
+        location: findColumn(['ubicacion', 'location', 'locacion', 'rack', 'shelf']),
         category: findColumn(['categoria', 'category', 'departamento']),
         price: findColumn(['precio', 'price', 'precioventa', 'saleprice', 'pricecjmarine']),
         cost: findColumn(['costo', 'cost', 'preciocosto', 'costprice']),
@@ -929,6 +970,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
           sku: normalizedSku || (matched?.sku || ''),
           name: nameRaw.trim(),
           barcode: normalizedBarcode || (matched?.barcode || ''),
+          location: col.location >= 0 ? String(row[col.location] || '').trim().toUpperCase() : (matched?.location || ''),
           categoryId: categoryFound?.id || matched?.categoryId || '',
           category: categoryFound?.name || categoryName || matched?.category || '',
           price: parseNumber(col.price >= 0 ? row[col.price] : matched?.price, matched?.price || 0),
@@ -1039,13 +1081,22 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                 <Plus size={20} />
                 <span className="hidden md:inline">Nuevo Producto</span>
               </button>
-              <button
-                type="button"
-                onClick={handleDeleteAllProducts}
-                className="btn btn-secondary whitespace-nowrap"
-              >
-                Borrar todo
-              </button>
+              {canDeleteAllProducts && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (products.length === 0) {
+                      showNotification('error', 'No hay productos para borrar');
+                      return;
+                    }
+                    setDeleteAllPassword('');
+                    setShowDeleteAllModal(true);
+                  }}
+                  className="btn btn-secondary whitespace-nowrap"
+                >
+                  Borrar todo
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1057,6 +1108,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                 <th>Producto</th>
                 <th>SKU</th>
                 <th>Código</th>
+                <th>Ubicación</th>
                 <th>Categoría</th>
                 <th>Precio</th>
                 <th>Stock</th>
@@ -1099,6 +1151,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                       </td>
                       <td className="font-mono text-sm">{product.sku || '-'}</td>
                       <td className="font-mono text-sm">{product.barcode}</td>
+                      <td className="font-mono text-sm">{product.location || '-'}</td>
                       <td>
                         <span className="badge badge-info">{product.category}</span>
                       </td>
@@ -1139,7 +1192,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
                     {isExpanded && (
                       <tr className="bg-blue-50/60">
-                        <td colSpan="8" className="px-6 py-4">
+                        <td colSpan="9" className="px-6 py-4">
                           <div className="rounded-xl border border-blue-100 bg-white p-4">
                             <div className="flex items-center justify-between gap-3 mb-3">
                               <div>
@@ -1168,6 +1221,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                                     <p className="text-xs text-gray-500 mt-1">{linkedProduct.description || 'Sin descripción'}</p>
                                     <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-600">
                                       <span>SKU: {linkedProduct.sku || '-'}</span>
+                                      <span>Ubicación: {linkedProduct.location || '-'}</span>
                                       <span>Stock: {linkedProduct.stock}{linkedProduct.unitType === 'feet' ? ' pies' : ''}</span>
                                     </div>
                                     <div className="mt-2 flex items-center justify-between">
@@ -1231,8 +1285,56 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
               </button>
             </div>
           </div>
-        )}
+      )}
       </div>
+
+      <Modal
+        isOpen={showDeleteAllModal}
+        onClose={() => {
+          if (deletingAll) return;
+          setShowDeleteAllModal(false);
+          setDeleteAllPassword('');
+        }}
+        title="Confirmar borrado total"
+        size="md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            Esto borrará todos los productos del sistema. Solo un administrador puede confirmar esta acción.
+          </div>
+
+          <Input
+            label="Contraseña del administrador"
+            type="password"
+            value={deleteAllPassword}
+            onChange={(e) => setDeleteAllPassword(e.target.value)}
+            placeholder="Escribe tu contraseña para continuar"
+            required
+          />
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setShowDeleteAllModal(false);
+                setDeleteAllPassword('');
+              }}
+              disabled={deletingAll}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleDeleteAllProducts}
+              disabled={deletingAll}
+            >
+              {deletingAll ? 'Verificando...' : 'Confirmar borrado'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Add/Edit Modal */}
       <Modal
@@ -1280,6 +1382,13 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                 {isMobileDevice ? 'Escanear con cámara' : 'Escanear con scanner'}
               </button>
             </div>
+
+            <Input
+              label="Ubicación"
+              value={formData.location}
+              onChange={(e) => setFormData({ ...formData, location: e.target.value.toUpperCase() })}
+              placeholder="Ej: T4"
+            />
             
             <Select
               label="Categoría"

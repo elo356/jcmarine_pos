@@ -90,6 +90,10 @@ export const createEmployeeWithAccount = async ({
   address,
   createdBy
 }) => {
+  if (!password) {
+    throw new Error('Debes definir una contraseña temporal para la cuenta.');
+  }
+
   const secondaryApp = createSecondaryApp();
   const secondaryAuth = getAuth(secondaryApp);
 
@@ -129,6 +133,12 @@ export const createEmployeeWithAccount = async ({
     await setDoc(doc(db, 'users', uid), userPayload, { merge: true });
 
     return uid;
+  } catch (error) {
+    if (error?.code === 'auth/weak-password') {
+      throw new Error('Firebase Auth requiere una contraseña de al menos 6 caracteres para crear la cuenta.');
+    }
+
+    throw error;
   } finally {
     await firebaseSignOut(secondaryAuth);
     await disposeSecondaryApp(secondaryApp);

@@ -13,15 +13,16 @@ import { subscribeSales } from '../services/salesService';
 import { subscribeProducts } from '../services/inventoryService';
 import { subscribeEmployees } from '../services/employeesService';
 import { getPaymentMethodLabel, normalizePaymentMethod } from '../utils/paymentUtils';
-import { isRefundedSale, isReportableSale } from '../utils/salesUtils';
-import { subscribeSpecialOrders } from '../services/specialOrdersService';
-import { SPECIAL_ORDER_STATUS } from '../utils/specialOrderUtils';
+import { getNetSaleTotal, isRefundedSale, isReportableSale } from '../utils/salesUtils';
+import { subscribeSpecialOrderPayments, subscribeSpecialOrders } from '../services/specialOrdersService';
+import { normalizeSpecialOrder, SPECIAL_ORDER_STATUS } from '../utils/specialOrderUtils';
 
 function Dashboard() {
   const [sales, setSales] = useState([]);
   const [products, setProducts] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [specialOrders, setSpecialOrders] = useState([]);
+  const [specialOrderPayments, setSpecialOrderPayments] = useState([]);
   const [stats, setStats] = useState({});
   const [recentSales, setRecentSales] = useState([]);
   const [lowStockProducts, setLowStockProducts] = useState([]);
@@ -33,19 +34,30 @@ function Dashboard() {
     setProducts(data.products || []);
     setEmployees(data.employees || []);
     setSpecialOrders(data.specialOrders || []);
+    setSpecialOrderPayments(data.specialOrderPayments || []);
 
     const unsubSales = subscribeSales((rows) => setSales(rows), (err) => console.error(err));
     const unsubProducts = subscribeProducts((rows) => setProducts(rows), (err) => console.error(err));
     const unsubEmployees = subscribeEmployees((rows) => setEmployees(rows), (err) => console.error(err));
     const unsubSpecialOrders = subscribeSpecialOrders((rows) => setSpecialOrders(rows), (err) => console.error(err));
+    const unsubSpecialPayments = subscribeSpecialOrderPayments((rows) => setSpecialOrderPayments(rows), (err) => console.error(err));
 
     return () => {
       unsubSales();
       unsubProducts();
       unsubEmployees();
       unsubSpecialOrders();
+      unsubSpecialPayments();
     };
   }, []);
+
+  const hydratedSpecialOrders = React.useMemo(
+    () => (specialOrders || []).map((order) => normalizeSpecialOrder({
+      ...order,
+      payments: specialOrderPayments.filter((payment) => payment.specialOrderId === order.id)
+    })),
+    [specialOrderPayments, specialOrders]
+  );
 
   useEffect(() => {
     // Calcular estadísticas
@@ -54,7 +66,6 @@ function Dashboard() {
     
     const paidSales = sales.filter(isReportableSale);
     const todaySales = paidSales.filter(s => new Date(s.date) >= today);
-    const specialOrderPayments = specialOrders.flatMap((order) => order.payments || []);
     const totalSpecialRevenue = specialOrderPayments.reduce((sum, payment) => (
       sum + (payment.kind === 'refund' ? -Number(payment.amount || 0) : Number(payment.amount || 0))
     ), 0);
@@ -63,14 +74,14 @@ function Dashboard() {
       .reduce((sum, payment) => (
         sum + (payment.kind === 'refund' ? -Number(payment.amount || 0) : Number(payment.amount || 0))
       ), 0);
-    const totalRevenue = paidSales.reduce((sum, s) => sum + s.total, 0) + totalSpecialRevenue;
-    const todayRevenue = todaySales.reduce((sum, s) => sum + s.total, 0) + todaySpecialRevenue;
+    const totalRevenue = paidSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + totalSpecialRevenue;
+    const todayRevenue = todaySales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + todaySpecialRevenue;
     const lowStock = products.filter(p => p.stock <= p.lowStockThreshold);
-    const readyOrders = specialOrders.filter((order) => order.orderStatus === SPECIAL_ORDER_STATUS.ready_for_pickup);
-    const pendingBalance = specialOrders
+    const readyOrders = hydratedSpecialOrders.filter((order) => order.orderStatus === SPECIAL_ORDER_STATUS.ready_for_pickup);
+    const pendingBalance = hydratedSpecialOrders
       .filter((order) => order.orderStatus !== SPECIAL_ORDER_STATUS.canceled)
       .reduce((sum, order) => sum + Number(order.balanceDue || 0), 0);
-    const deliveredSpecialOrdersToday = specialOrders.filter((order) => {
+    const deliveredSpecialOrdersToday = hydratedSpecialOrders.filter((order) => {
       if (order.orderStatus !== SPECIAL_ORDER_STATUS.delivered || !order.deliveredAt) return false;
       return new Date(order.deliveredAt) >= today;
     });
@@ -97,7 +108,7 @@ function Dashboard() {
     setRecentSales(sales.slice(0, 5));
     setLowStockProducts(lowStock);
     setTopProducts(products.slice(0, 5));
-  }, [sales, products, employees, specialOrders]);
+  }, [employees, hydratedSpecialOrders, products, sales, specialOrderPayments]);
 
   return (
     <div className="space-y-6">
@@ -252,7 +263,7 @@ function Dashboard() {
         {/* Recent Sales */}
         <div className="card p-6">
           <h3 className="text-lg font-semibold mb-4">Ventas Recientes</h3>
-          <div className="space-y-3">
+          <div className="max-h-[26rem] overflow-y-auto pr-2 space-y-3">
             {recentSales.map((sale) => (
               <div key={sale.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                 <div>
@@ -284,7 +295,7 @@ function Dashboard() {
             <AlertTriangle size={20} className="text-orange-500" />
             Alertas de Stock Bajo
           </h3>
-          <div className="space-y-3">
+          <div className="max-h-[26rem] overflow-y-auto pr-2 space-y-3">
             {lowStockProducts.length > 0 ? (
               lowStockProducts.map((product) => (
                 <div key={product.id} className="flex items-center justify-between p-4 bg-orange-50 border border-orange-200 rounded-lg">

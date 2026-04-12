@@ -35,8 +35,13 @@ import {
   getPaymentMethodLabel,
   PAYMENT_METHODS
 } from '../utils/paymentUtils';
-import { buildSalePrintHtml } from '../utils/printTemplates';
+import {
+  buildSalePrintHtml,
+  buildSaleReceiptEmailHtml,
+  buildSaleReceiptEmailText
+} from '../utils/printTemplates';
 import { printHtmlDocument } from '../services/printService';
+import { canSendReceiptEmail, sendReceiptEmail } from '../services/receiptEmailService';
 
 const IVU_STATE_RATE = 0.105;
 const IVU_MUNICIPAL_RATE = 0.01;
@@ -105,6 +110,8 @@ function POS({
   const [manualBarcode, setManualBarcode] = useState('');
   const [keyboardScannerDetected, setKeyboardScannerDetected] = useState(false);
   const [selectedPrintDocument, setSelectedPrintDocument] = useState('receipt');
+  const [receiptEmail, setReceiptEmail] = useState('');
+  const [isSendingReceiptEmail, setIsSendingReceiptEmail] = useState(false);
   const POS_PAGE_SIZE = 80;
   const debouncedSearch = useDebouncedValue(searchQuery, 250);
   const isMobileDevice = useIsMobileDevice();
@@ -797,6 +804,7 @@ function POS({
       setCart([]);
       setShowPaymentModal(false);
       setShowReceiptModal(true);
+      setReceiptEmail('');
       setSelectedPrintDocument('receipt');
       resetPaymentState();
       showNotification(
@@ -937,6 +945,43 @@ function POS({
     } catch (error) {
       console.error(error);
       showNotification('error', 'No se pudo abrir la impresión.');
+    }
+  };
+
+  const handleSendReceiptEmail = async () => {
+    if (!lastSale) return;
+
+    const normalizedEmail = receiptEmail.trim();
+    if (!normalizedEmail) {
+      showNotification('error', 'Escribe el email del cliente para enviar el recibo.');
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      showNotification('error', 'Escribe un email válido.');
+      return;
+    }
+
+    if (!canSendReceiptEmail()) {
+      showNotification('warning', 'El envío por email solo está disponible en la app de escritorio.');
+      return;
+    }
+
+    setIsSendingReceiptEmail(true);
+
+    try {
+      await sendReceiptEmail({
+        to: normalizedEmail,
+        subject: `Recibo CJ Marine ${lastSale.id}`,
+        html: buildSaleReceiptEmailHtml({ sale: lastSale }),
+        text: buildSaleReceiptEmailText({ sale: lastSale })
+      });
+      showNotification('success', `Recibo enviado a ${normalizedEmail}.`);
+    } catch (error) {
+      console.error('Error sending receipt email:', error);
+      showNotification('error', error?.message || 'No se pudo enviar el recibo por email.');
+    } finally {
+      setIsSendingReceiptEmail(false);
     }
   };
 
@@ -1757,6 +1802,31 @@ function POS({
                 </p>
               ) : null}
               <p className="text-sm text-gray-500 mt-4">¡Gracias por su compra!</p>
+            </div>
+
+            <div className="border-t pt-4 space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Enviar recibo por email
+                </label>
+                <input
+                  type="email"
+                  value={receiptEmail}
+                  onChange={(e) => setReceiptEmail(e.target.value)}
+                  className="input w-full"
+                  placeholder="cliente@email.com"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Se enviará desde `cjmarinepr@gmail.com` usando el backend de correos.
+                </p>
+              </div>
+              <button
+                onClick={handleSendReceiptEmail}
+                className="w-full btn btn-secondary"
+                disabled={isSendingReceiptEmail}
+              >
+                {isSendingReceiptEmail ? 'Enviando recibo...' : 'Enviar recibo por email'}
+              </button>
             </div>
 
             <div className="flex gap-4">

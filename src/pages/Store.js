@@ -10,7 +10,7 @@ import { subscribeSales } from '../services/salesService';
 import { createStoreStatusLog, subscribeStoreStatusLogs } from '../services/storeStatusLogService';
 import { PAYMENT_METHODS } from '../utils/paymentUtils';
 import { buildStoreClosurePrintHtml } from '../utils/printTemplates';
-import { isRefundedSale, isReportableSale } from '../utils/salesUtils';
+import { getNetSaleTotal, getSaleRefundTotal, isReportableSale } from '../utils/salesUtils';
 import { printHtmlDocument } from '../services/printService';
 
 const DEFAULT_CLOSE_FORM = {
@@ -118,31 +118,30 @@ const StorePage = () => {
     if (!activeStoreSession) return null;
 
     const paidSales = activeSessionSales.filter(isReportableSale);
-    const refundedSales = activeSessionSales.filter(isRefundedSale);
     const grossSales = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.subtotal || 0), 0));
     const discounts = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.discount || 0), 0));
-    const refunds = roundMoney(refundedSales.reduce((sum, sale) => sum + Number(sale.total || 0), 0));
+    const refunds = roundMoney(activeSessionSales.reduce((sum, sale) => sum + getSaleRefundTotal(sale), 0));
     const taxes = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.tax || 0), 0));
-    const totalTendered = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.total || 0), 0));
+    const totalTendered = roundMoney(paidSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0));
     const cashPayments = roundMoney(
       paidSales
         .filter((sale) => sale.paymentMethod === PAYMENT_METHODS.cash)
-        .reduce((sum, sale) => sum + Number(sale.total || 0), 0)
+        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0)
     );
     const athMovilPayments = roundMoney(
       paidSales
         .filter((sale) => sale.paymentMethod === PAYMENT_METHODS.athMovil)
-        .reduce((sum, sale) => sum + Number(sale.total || 0), 0)
+        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0)
     );
     const cardPayments = roundMoney(
       paidSales
         .filter((sale) => sale.paymentMethod === PAYMENT_METHODS.card)
-        .reduce((sum, sale) => sum + Number(sale.total || 0), 0)
+        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0)
     );
     const cashRefunds = roundMoney(
-      refundedSales
+      activeSessionSales
         .filter((sale) => sale.paymentMethod === PAYMENT_METHODS.cash)
-        .reduce((sum, sale) => sum + Number(sale.total || 0), 0)
+        .reduce((sum, sale) => sum + getSaleRefundTotal(sale), 0)
     );
     const paidIn = roundMoney(getNumber(closeForm.paidIn));
     const paidOut = roundMoney(getNumber(closeForm.paidOut));

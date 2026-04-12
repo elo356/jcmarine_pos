@@ -64,8 +64,11 @@ const Inventory = () => {
 
   const inventory = useMemo(() => {
     return products.map((product) => {
-      const isLowStock = product.stock <= product.lowStockThreshold;
-      const stockStatus = isLowStock ? 'low' : (product.stock === 0 ? 'out' : 'normal');
+      const stockStatus = product.stock === 0
+        ? 'out'
+        : product.stock <= product.lowStockThreshold
+          ? 'low'
+          : 'normal';
 
       return {
         ...product,
@@ -122,7 +125,8 @@ const Inventory = () => {
             item.name.toLowerCase().includes(query) ||
             item.barcode.includes(debouncedSearch) ||
             item.category.toLowerCase().includes(query) ||
-            (item.description || '').toLowerCase().includes(query)
+            (item.description || '').toLowerCase().includes(query) ||
+            (item.location || '').toLowerCase().includes(query)
           )
           .map((item) => item.id)
       );
@@ -346,6 +350,7 @@ const Inventory = () => {
                 <th>Product</th>
                 <th>Category</th>
                 <th>Stock</th>
+                <th>Ubicación</th>
                 <th>Cost</th>
                 <th>Value</th>
                 <th>Status</th>
@@ -355,7 +360,7 @@ const Inventory = () => {
             <tbody>
               {filteredInventory.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-8 text-gray-500">
+                  <td colSpan="8" className="text-center py-8 text-gray-500">
                     No inventory found
                   </td>
                 </tr>
@@ -378,6 +383,9 @@ const Inventory = () => {
                           <AlertTriangle size={16} className="text-yellow-500" />
                         )}
                       </div>
+                    </td>
+                    <td>
+                      <span className="text-sm text-gray-700">{item.location || '-'}</span>
                     </td>
                     <td>{formatCurrency(item.cost)}</td>
                     <td>{formatCurrency(item.stock * item.cost)}</td>

@@ -25,6 +25,7 @@ function SpecialOrderDetailModal({
   onMarkWaiting,
   onMarkReady,
   onDeliver,
+  onUndoDelivered,
   onCancel
 }) {
   if (!order) return null;
@@ -250,6 +251,11 @@ function SpecialOrderDetailModal({
             {canDeliverSpecialOrder(order) && (
               <button className="btn btn-primary" onClick={() => onDeliver(order)}>
                 Entregar pedido
+              </button>
+            )}
+            {order.orderStatus === 'delivered' && (
+              <button className="btn btn-secondary" onClick={() => onUndoDelivered(order)}>
+                Marcar como no entregado
               </button>
             )}
             {order.orderStatus !== 'delivered' && order.orderStatus !== 'canceled' && (

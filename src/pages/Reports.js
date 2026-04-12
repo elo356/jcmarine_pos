@@ -5,14 +5,15 @@ import Notification from '../components/Notification';
 import { subscribeSales } from '../services/salesService';
 import { subscribeProducts } from '../services/inventoryService';
 import { normalizePaymentMethod } from '../utils/paymentUtils';
-import { isReportableSale } from '../utils/salesUtils';
-import { subscribeSpecialOrders } from '../services/specialOrdersService';
-import { SPECIAL_ORDER_STATUS } from '../utils/specialOrderUtils';
+import { getNetSaleTotal, isReportableSale } from '../utils/salesUtils';
+import { subscribeSpecialOrderPayments, subscribeSpecialOrders } from '../services/specialOrdersService';
+import { normalizeSpecialOrder, SPECIAL_ORDER_STATUS } from '../utils/specialOrderUtils';
 
 const Reports = () => {
   const [sales, setSales] = useState([]);
   const [products, setProducts] = useState([]);
   const [specialOrders, setSpecialOrders] = useState([]);
+  const [specialOrderPayments, setSpecialOrderPayments] = useState([]);
   const [dateRange, setDateRange] = useState('week');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -47,17 +48,28 @@ const Reports = () => {
     setSales(data.sales || []);
     setProducts(data.products || []);
     setSpecialOrders(data.specialOrders || []);
+    setSpecialOrderPayments(data.specialOrderPayments || []);
     setDefaultDateRange();
     const unsubSales = subscribeSales((rows) => setSales(rows), (err) => console.error(err));
     const unsubProducts = subscribeProducts((rows) => setProducts(rows), (err) => console.error(err));
     const unsubSpecialOrders = subscribeSpecialOrders((rows) => setSpecialOrders(rows), (err) => console.error(err));
+    const unsubSpecialPayments = subscribeSpecialOrderPayments((rows) => setSpecialOrderPayments(rows), (err) => console.error(err));
 
     return () => {
       unsubSales();
       unsubProducts();
       unsubSpecialOrders();
+      unsubSpecialPayments();
     };
   }, [setDefaultDateRange]);
+
+  const hydratedSpecialOrders = useMemo(
+    () => (specialOrders || []).map((order) => normalizeSpecialOrder({
+      ...order,
+      payments: specialOrderPayments.filter((payment) => payment.specialOrderId === order.id)
+    })),
+    [specialOrderPayments, specialOrders]
+  );
 
   const getDateRangeSales = () => {
     const start = parseLocalDate(startDate, false);
@@ -100,8 +112,7 @@ const Reports = () => {
     const filteredSales = getDateRangeSales();
     const start = parseLocalDate(startDate, false);
     const end = parseLocalDate(endDate, true);
-    const filteredSpecialPayments = (specialOrders || [])
-      .flatMap((order) => order.payments || [])
+    const filteredSpecialPayments = specialOrderPayments
       .filter((payment) => {
         const paymentDate = new Date(payment.createdAt || payment.confirmed_at);
         return start && end && paymentDate >= start && paymentDate <= end;
@@ -110,7 +121,7 @@ const Reports = () => {
     const specialRevenue = filteredSpecialPayments.reduce((sum, payment) => (
       sum + (payment.kind === 'refund' ? -Number(payment.amount || 0) : Number(payment.amount || 0))
     ), 0);
-    const totalRevenue = filteredSales.reduce((sum, sale) => sum + sale.total, 0) + specialRevenue;
+    const totalRevenue = filteredSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + specialRevenue;
     const totalItems = filteredSales.reduce((sum, sale) => 
       sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
     );
@@ -169,7 +180,7 @@ const Reports = () => {
     filteredSales.forEach(sale => {
       const method = normalizePaymentMethod(sale.paymentMethod);
       if (methodSales.hasOwnProperty(method)) {
-        methodSales[method] += sale.total;
+        methodSales[method] += getNetSaleTotal(sale);
       }
     });
 
@@ -205,7 +216,7 @@ const Reports = () => {
 
     filteredSales.forEach(sale => {
       const hour = new Date(sale.date).getHours();
-      hourlyData[hour].sales += sale.total;
+      hourlyData[hour].sales += getNetSaleTotal(sale);
     });
 
     return hourlyData;
@@ -220,7 +231,7 @@ const Reports = () => {
       if (!dailyData[date]) {
         dailyData[date] = { date, revenue: 0, transactions: 0 };
       }
-      dailyData[date].revenue += sale.total;
+      dailyData[date].revenue += getNetSaleTotal(sale);
       dailyData[date].transactions += 1;
     });
 
@@ -260,7 +271,7 @@ const Reports = () => {
   const hourlySales = getHourlySales();
   const dailySales = getDailySales();
   const specialOrderMetrics = useMemo(() => {
-    const filtered = specialOrders.filter((order) => {
+    const filtered = hydratedSpecialOrders.filter((order) => {
       const relevantDate = new Date(order.deliveredAt || order.createdAt);
       const start = parseLocalDate(startDate, false);
       const end = parseLocalDate(endDate, true);
@@ -285,7 +296,7 @@ const Reports = () => {
           0
         )
     };
-  }, [endDate, specialOrders, startDate]);
+  }, [endDate, hydratedSpecialOrders, startDate]);
   const maxHourlySales = Math.max(...hourlySales.map(h => h.sales));
   const maxDailySales = Math.max(...dailySales.map(d => d.revenue));
 

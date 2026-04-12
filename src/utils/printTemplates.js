@@ -147,6 +147,103 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
   return basePrintDocument({ title, body });
 };
 
+export const buildSaleRefundPrintHtml = ({ sale, refund, printerName = '' }) => {
+  const body = `
+    ${buildStoreHeader({
+      employeeLabel: 'Empleado',
+      employeeValue: refund.refundedBy || sale.cashier,
+      printerName
+    })}
+
+    ${dottedDivider}
+
+    <div class="section">
+      <div class="row"><span>Venta</span><strong>${sale.id}</strong></div>
+      <div class="row"><span>Fecha venta</span><strong>${formatDateTime(sale.date)}</strong></div>
+      <div class="row"><span>Fecha refund</span><strong>${formatDateTime(refund.refundedAt)}</strong></div>
+      <div class="row"><span>Método</span><strong>${getPaymentMethodLabel(refund.method)}</strong></div>
+      <div class="row"><span>Monto refund</span><strong>${formatCurrency(refund.amount)}</strong></div>
+      <div class="row"><span>Total original</span><strong>${formatCurrency(sale.total)}</strong></div>
+    </div>
+
+    ${refund.reason ? `
+      ${dottedDivider}
+      <div class="section">
+        <p><strong>Razón:</strong> ${refund.reason}</p>
+        ${refund.notes ? `<p class="muted" style="margin-top:8px;">${refund.notes}</p>` : ''}
+      </div>
+    ` : ''}
+
+    ${dottedDivider}
+
+    <div class="footer">
+      <p class="muted" style="margin-top:12px;">Documento: Recibo de reembolso</p>
+      <p class="muted">Venta: ${sale.id}</p>
+      <p class="muted">Reembolso: ${refund.id}</p>
+    </div>
+  `;
+
+  return basePrintDocument({ title: `Reembolso ${refund.id}`, body });
+};
+
+export const buildSaleReceiptEmailHtml = ({ sale }) => `
+  <div style="font-family:Arial,sans-serif;color:#111827;max-width:720px;margin:0 auto;padding:24px;">
+    <div style="text-align:center;margin-bottom:20px;">
+      <h1 style="margin:0;font-size:24px;">CJ Marine</h1>
+      <p style="margin:6px 0 0;color:#6b7280;">Gracias por su compra</p>
+    </div>
+
+    <div style="margin-bottom:20px;">
+      <p style="margin:0 0 6px;"><strong>Recibo:</strong> ${sale.id}</p>
+      <p style="margin:0 0 6px;"><strong>Fecha:</strong> ${formatDateTime(sale.date)}</p>
+      <p style="margin:0;"><strong>Cajero:</strong> ${sale.cashier || '-'}</p>
+    </div>
+
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+      <thead>
+        <tr>
+          <th style="text-align:left;border-bottom:1px solid #e5e7eb;padding:8px 0;">Producto</th>
+          <th style="text-align:right;border-bottom:1px solid #e5e7eb;padding:8px 0;">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${sale.items.map((item) => `
+          <tr>
+            <td style="padding:8px 0;border-bottom:1px solid #f3f4f6;">
+              ${item.name}${item.quantity > 1 ? ` x${formatQuantity(item.quantity, item.unitType)}` : ''}
+            </td>
+            <td style="padding:8px 0;border-bottom:1px solid #f3f4f6;text-align:right;">
+              ${formatCurrency(item.taxableSubtotal || item.subtotal || 0)}
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+
+    <div style="border-top:2px solid #111827;padding-top:12px;">
+      <p style="display:flex;justify-content:space-between;margin:0 0 6px;"><span>Subtotal</span><strong>${formatCurrency(sale.subtotal || 0)}</strong></p>
+      <p style="display:flex;justify-content:space-between;margin:0 0 6px;"><span>IVU</span><strong>${formatCurrency(sale.tax || 0)}</strong></p>
+      <p style="display:flex;justify-content:space-between;margin:0 0 6px;"><span>Total</span><strong>${formatCurrency(sale.total || 0)}</strong></p>
+      <p style="display:flex;justify-content:space-between;margin:0;"><span>Método de pago</span><strong>${getPaymentMethodLabel(sale.paymentMethod)}</strong></p>
+    </div>
+  </div>
+`;
+
+export const buildSaleReceiptEmailText = ({ sale }) => [
+  'CJ Marine',
+  '',
+  `Recibo: ${sale.id}`,
+  `Fecha: ${formatDateTime(sale.date)}`,
+  `Cajero: ${sale.cashier || '-'}`,
+  '',
+  ...sale.items.map((item) => `${item.name} x${formatQuantity(item.quantity, item.unitType)} - ${formatCurrency(item.taxableSubtotal || item.subtotal || 0)}`),
+  '',
+  `Subtotal: ${formatCurrency(sale.subtotal || 0)}`,
+  `IVU: ${formatCurrency(sale.tax || 0)}`,
+  `Total: ${formatCurrency(sale.total || 0)}`,
+  `Pago: ${getPaymentMethodLabel(sale.paymentMethod)}`
+].join('\n');
+
 export const buildSpecialOrderPrintHtml = ({ order, printerName = '' }) => {
   const body = `
     ${buildStoreHeader({

@@ -186,6 +186,32 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     setNotification({ id: Date.now(), type, message });
   };
 
+  const markOrderAsDelivered = (order) => {
+    if (!canDeliverSpecialOrder(order)) {
+      showNotification('error', 'No se puede entregar el pedido mientras tenga balance pendiente.');
+      return;
+    }
+    commitStatusChange({
+      order,
+      nextStatus: SPECIAL_ORDER_STATUS.delivered,
+      description: 'Pedido entregado al cliente.',
+      patch: {
+        deliveredAt: new Date().toISOString()
+      }
+    });
+  };
+
+  const undoDeliveredOrder = (order) => {
+    commitStatusChange({
+      order,
+      nextStatus: SPECIAL_ORDER_STATUS.ready_for_pickup,
+      description: 'Entrega revertida. Pedido marcado nuevamente como listo para recoger.',
+      patch: {
+        deliveredAt: ''
+      }
+    });
+  };
+
   const updateLocalState = ({ nextOrders, nextPayments, nextCustomers, nextAuditLogs }) => {
     const current = loadData();
     const updated = {
@@ -746,20 +772,8 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
                 readyAt: new Date().toISOString()
               }
             })}
-            onDeliver={(order) => {
-              if (!canDeliverSpecialOrder(order)) {
-                showNotification('error', 'No se puede entregar el pedido mientras tenga balance pendiente.');
-                return;
-              }
-              commitStatusChange({
-                order,
-                nextStatus: SPECIAL_ORDER_STATUS.delivered,
-                description: 'Pedido entregado al cliente.',
-                patch: {
-                  deliveredAt: new Date().toISOString()
-                }
-              });
-            }}
+            onDeliver={markOrderAsDelivered}
+            onUndoDelivered={undoDeliveredOrder}
             onCancel={setCancellationOrder}
           />
         ) : (
@@ -824,18 +838,8 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
             readyAt: new Date().toISOString()
           }
         })}
-        onDeliver={(order) => {
-          if (!canDeliverSpecialOrder(order)) {
-            showNotification('error', 'No se puede entregar el pedido mientras tenga balance pendiente.');
-            return;
-          }
-          commitStatusChange({
-            order,
-            nextStatus: SPECIAL_ORDER_STATUS.delivered,
-            description: 'Pedido entregado al cliente.',
-            patch: { deliveredAt: new Date().toISOString() }
-          });
-        }}
+        onDeliver={markOrderAsDelivered}
+        onUndoDelivered={undoDeliveredOrder}
         onCancel={setCancellationOrder}
       />
 

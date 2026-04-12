@@ -8,7 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { subscribeEmployees } from '../services/employeesService';
 import { subscribeSales } from '../services/salesService';
 import { createShift, patchShift, subscribeShifts } from '../services/shiftsService';
-import { isReportableSale } from '../utils/salesUtils';
+import { getNetSaleTotal, isReportableSale } from '../utils/salesUtils';
 
 const Shifts = () => {
   const { user, profile } = useAuth();
@@ -154,7 +154,7 @@ const Shifts = () => {
       const saleDate = new Date(sale.date);
       return saleDate >= startTime && saleDate <= endTime && isReportableSale(sale);
     });
-    const totalSales = shiftSales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+    const totalSales = shiftSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0);
 
     try {
       await patchShift(activeShift.id, {

@@ -197,7 +197,7 @@ const Employees = () => {
   const activeCount = employees.filter((e) => e.status === 'active').length;
   const totalPayroll = employees
     .filter((e) => e.status === 'active')
-    .reduce((sum, e) => sum + ((Number(e.hourlyRate) || 0) * 160), 0);
+    .reduce((sum, e) => sum + (Number(e.hourlyRate) || 0), 0);
 
   return (
     <div className="page-container">
@@ -249,11 +249,11 @@ const Employees = () => {
           </div>
         </div>
         <div className="card">
-          <div className="stat-label">Est. Monthly Payroll</div>
+          <div className="stat-label">Total Hourly Payroll</div>
           <div className="stat-value">${totalPayroll.toLocaleString()}</div>
           <div className="stat-trend">
             <DollarSign size={16} className="text-green-500" />
-            <span className="text-green-500">160h/month</span>
+            <span className="text-green-500">Suma por hora de empleados activos</span>
           </div>
         </div>
       </div>
@@ -384,7 +384,7 @@ const Employees = () => {
                   type="password"
                   value={formData.password}
                   onChange={handleInputChange}
-                  placeholder="Min 6 caracteres"
+                  placeholder="Contraseña temporal"
                   required
                 />
               )}

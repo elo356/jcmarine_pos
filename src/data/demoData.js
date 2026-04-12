@@ -22,7 +22,8 @@ export const normalizeProductTaxConfig = (product = {}) => ({
   ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false,
   unitType: product.unitType === 'feet' ? 'feet' : 'unit',
   useSizeSelection: product.useSizeSelection === true,
-  availableSizes: normalizeProductSizes(product.availableSizes)
+  availableSizes: normalizeProductSizes(product.availableSizes),
+  location: String(product.location || product.ubicacion || '').trim()
 });
 
 export const normalizePrintSettings = (data = {}) => {
