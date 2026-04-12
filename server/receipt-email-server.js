@@ -1,3 +1,5 @@
+require('dotenv').config({ path: require('path').join(__dirname, '.env.receipts') });
+
 const http = require('http');
 const nodemailer = require('nodemailer');
 
