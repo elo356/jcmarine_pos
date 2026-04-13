@@ -16,8 +16,8 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "npm run build:web",
-    "build:web": "react-scripts build",
-    "build:desktop": "cross-env PUBLIC_URL=./ react-scripts build",
+    "build:web": "cross-env GENERATE_SOURCEMAP=false react-scripts build",
+    "build:desktop": "cross-env PUBLIC_URL=./ GENERATE_SOURCEMAP=false react-scripts build",
     "electron:dev": "concurrently \"cross-env BROWSER=none npm start\" \"wait-on http://localhost:3000 && cross-env ELECTRON_START_URL=http://localhost:3000 electron .\"",
     "electron:build": "npm run build:desktop && electron-builder",
     "electron:build:win": "npm run build:desktop && electron-builder --win nsis",
