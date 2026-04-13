@@ -42,6 +42,7 @@ const IVU_STATE_RATE = 0.105;
 const IVU_MUNICIPAL_RATE = 0.01;
 const SHARED_CART_SYNC_DEBOUNCE_MS = 250;
 const DEFAULT_ITEM_DISCOUNT = { type: 'percentage', value: 0 };
+const FIRESTORE_SYNC_TIMEOUT_MS = 8000;
 
 const normalizeItemDiscount = (discount = {}) => ({
   type: discount?.type === 'fixed' ? 'fixed' : 'percentage',
@@ -71,6 +72,22 @@ const calculateItemPricing = (item) => {
     total: taxableSubtotal + stateTax + municipalTax
   };
 };
+
+const withTimeout = (promise, timeoutMs, label) => new Promise((resolve, reject) => {
+  const timerId = window.setTimeout(() => {
+    reject(new Error(`Tiempo de espera agotado al sincronizar ${label}.`));
+  }, timeoutMs);
+
+  Promise.resolve(promise)
+    .then((value) => {
+      window.clearTimeout(timerId);
+      resolve(value);
+    })
+    .catch((error) => {
+      window.clearTimeout(timerId);
+      reject(error);
+    });
+});
 
 function POS({
   onCreateProductFromBarcode = () => {},
@@ -757,38 +774,6 @@ function POS({
       data.products = updatedProducts;
       saveData(data);
 
-      const syncErrors = [];
-
-      try {
-        await saveSale(sale);
-      } catch (error) {
-        syncErrors.push('venta');
-        console.error('Error saving sale in Firestore from POS:', error);
-      }
-
-      try {
-        await savePayments(paymentEntries);
-      } catch (error) {
-        syncErrors.push('pagos');
-        console.error('Error saving payments in Firestore from POS:', error);
-      }
-
-      try {
-        await decrementStockForSale(cart);
-      } catch (error) {
-        syncErrors.push('inventario');
-        console.error('Error updating stock in Firestore from POS:', error);
-      }
-
-      try {
-        await clearSharedPosCart(sharedCartEditor);
-      } catch (error) {
-        syncErrors.push('carrito');
-        console.error('Error clearing shared cart in Firestore from POS:', error);
-      }
-
-      const synced = syncErrors.length === 0;
-
       if (options.openDrawer) {
         openCashDrawer();
       }
@@ -799,6 +784,38 @@ function POS({
       setShowReceiptModal(true);
       setSelectedPrintDocument('receipt');
       resetPaymentState();
+
+      const syncErrors = [];
+
+      try {
+        await withTimeout(saveSale(sale), FIRESTORE_SYNC_TIMEOUT_MS, 'la venta');
+      } catch (error) {
+        syncErrors.push('venta');
+        console.error('Error saving sale in Firestore from POS:', error);
+      }
+
+      try {
+        await withTimeout(savePayments(paymentEntries), FIRESTORE_SYNC_TIMEOUT_MS, 'los pagos');
+      } catch (error) {
+        syncErrors.push('pagos');
+        console.error('Error saving payments in Firestore from POS:', error);
+      }
+
+      try {
+        await withTimeout(decrementStockForSale(cart), FIRESTORE_SYNC_TIMEOUT_MS, 'el inventario');
+      } catch (error) {
+        syncErrors.push('inventario');
+        console.error('Error updating stock in Firestore from POS:', error);
+      }
+
+      try {
+        await withTimeout(clearSharedPosCart(sharedCartEditor), FIRESTORE_SYNC_TIMEOUT_MS, 'el carrito compartido');
+      } catch (error) {
+        syncErrors.push('carrito');
+        console.error('Error clearing shared cart in Firestore from POS:', error);
+      }
+
+      const synced = syncErrors.length === 0;
       showNotification(
         synced ? 'success' : 'warning',
         synced
