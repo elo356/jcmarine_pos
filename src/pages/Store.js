@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Store, LogIn, LogOut, Receipt, DollarSign, CalendarClock } from 'lucide-react';
+import { Store, LogIn, LogOut, Receipt, DollarSign, CalendarClock, Printer } from 'lucide-react';
 import { loadData, formatCurrency, formatDateTime, generateId, normalizePrintSettings } from '../data/demoData';
 import Modal from '../components/Modal';
 import Input from '../components/Input';
@@ -279,6 +279,63 @@ const StorePage = () => {
     }
   };
 
+  const buildCloseSummaryFromLog = useCallback((log) => {
+    if (!log || log.action !== 'close') return null;
+
+    return {
+      shiftNumber: log.shiftNumber || 1,
+      openedAt: log.openedAt || log.createdAt,
+      openedByName: log.openedByName || '-',
+      closeTime: log.createdAt,
+      closedByName: log.employeeName || '-',
+      startingCash: roundMoney(log.summary?.cashDrawer?.startingCash ?? log.startingCash ?? 0),
+      cashPayments: roundMoney(log.summary?.cashDrawer?.cashPayments ?? 0),
+      cashRefunds: roundMoney(log.summary?.cashDrawer?.cashRefunds ?? 0),
+      paidIn: roundMoney(log.summary?.cashDrawer?.paidIn ?? log.paidIn ?? 0),
+      paidOut: roundMoney(log.summary?.cashDrawer?.paidOut ?? log.paidOut ?? 0),
+      expectedCashAmount: roundMoney(log.summary?.cashDrawer?.expectedCashAmount ?? log.expectedCashAmount ?? 0),
+      actualCashAmount: roundMoney(log.summary?.cashDrawer?.actualCashAmount ?? log.actualCashAmount ?? 0),
+      difference: roundMoney(log.summary?.cashDrawer?.difference ?? log.difference ?? 0),
+      grossSales: roundMoney(log.summary?.sales?.grossSales ?? 0),
+      refunds: roundMoney(log.summary?.sales?.refunds ?? 0),
+      discounts: roundMoney(log.summary?.sales?.discounts ?? 0),
+      netSales: roundMoney(log.summary?.sales?.netSales ?? 0),
+      taxes: roundMoney(log.summary?.sales?.taxes ?? 0),
+      totalTendered: roundMoney(log.summary?.sales?.totalTendered ?? 0),
+      tenders: {
+        cash: roundMoney(log.summary?.sales?.cash ?? 0),
+        athMovil: roundMoney(log.summary?.sales?.athMovil ?? 0),
+        card: roundMoney(log.summary?.sales?.card ?? 0)
+      }
+    };
+  }, []);
+
+  const handlePrintHistoricalCloseSummary = async (log) => {
+    const summary = buildCloseSummaryFromLog(log);
+    if (!summary) {
+      setNotification({ type: 'error', message: 'Ese registro no tiene un cierre imprimible.' });
+      return;
+    }
+
+    const printer = getReceiptPrinter();
+
+    try {
+      await printHtmlDocument({
+        title: `Cierre tienda turno ${summary.shiftNumber}`,
+        html: buildStoreClosurePrintHtml({
+          summary,
+          printerName: printer?.name || ''
+        }),
+        printer
+      });
+
+      setNotification({ type: 'success', message: 'Recibo de cierre enviado a impresión.' });
+    } catch (error) {
+      console.error(error);
+      setNotification({ type: 'error', message: 'No se pudo imprimir ese cierre.' });
+    }
+  };
+
   const handleCloseStore = async () => {
     if (!activeStoreSession || !closeSummary) {
       setNotification({ type: 'error', message: 'No hay una tienda abierta para cerrar.' });
@@ -436,12 +493,13 @@ const StorePage = () => {
                 <th>Esperado</th>
                 <th>Actual</th>
                 <th>Diferencia</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
               {historyRows.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-8 text-gray-500">
+                  <td colSpan="9" className="text-center py-8 text-gray-500">
                     No hay historial de tienda todavía
                   </td>
                 </tr>
@@ -460,6 +518,18 @@ const StorePage = () => {
                     <td>{log.action === 'close' ? formatCurrency(log.expectedCashAmount || 0) : '-'}</td>
                     <td>{log.action === 'close' ? formatCurrency(log.actualCashAmount || 0) : '-'}</td>
                     <td>{log.action === 'close' ? formatCurrency(log.difference || 0) : '-'}</td>
+                    <td>
+                      {log.action === 'close' ? (
+                        <button
+                          type="button"
+                          onClick={() => handlePrintHistoricalCloseSummary(log)}
+                          className="btn-secondary inline-flex items-center gap-2"
+                        >
+                          <Printer size={14} />
+                          Imprimir
+                        </button>
+                      ) : '-'}
+                    </td>
                   </tr>
                 ))
               )}
