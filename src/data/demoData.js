@@ -17,13 +17,45 @@ export const normalizeProductSizes = (sizes) => {
   return [...new Set(sizes.map((size) => String(size || '').trim()).filter(Boolean))];
 };
 
+export const normalizeProductSizeStocks = (sizeStocks = [], fallbackSizes = []) => {
+  const normalizedEntries = Array.isArray(sizeStocks)
+    ? sizeStocks
+        .map((entry) => {
+          if (typeof entry === 'string') {
+            return {
+              size: String(entry || '').trim(),
+              stock: 0
+            };
+          }
+
+          return {
+            size: String(entry?.size || '').trim(),
+            stock: Math.max(0, Number(entry?.stock || 0))
+          };
+        })
+        .filter((entry) => entry.size)
+    : [];
+
+  if (normalizedEntries.length > 0) {
+    const merged = new Map();
+    normalizedEntries.forEach((entry) => {
+      const current = merged.get(entry.size) || 0;
+      merged.set(entry.size, current + entry.stock);
+    });
+    return [...merged.entries()].map(([size, stock]) => ({ size, stock }));
+  }
+
+  return normalizeProductSizes(fallbackSizes).map((size) => ({ size, stock: 0 }));
+};
+
 export const normalizeProductTaxConfig = (product = {}) => ({
   ...product,
   ivuStateEnabled: product.ivuStateEnabled !== false,
   ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false,
   unitType: product.unitType === 'feet' ? 'feet' : 'unit',
   useSizeSelection: product.useSizeSelection === true,
-  availableSizes: normalizeProductSizes(product.availableSizes),
+  sizeStocks: normalizeProductSizeStocks(product.sizeStocks, product.availableSizes),
+  availableSizes: normalizeProductSizeStocks(product.sizeStocks, product.availableSizes).map((entry) => entry.size),
   location: String(product.location || product.ubicacion || '').trim()
 });
 

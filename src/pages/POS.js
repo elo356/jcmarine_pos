@@ -327,6 +327,27 @@ function POS({
       return sum + Number(item.quantity || 0);
     }, 0);
 
+  const getProductSizeQuantityInCart = (productId, selectedSize, excludingCartKey = null) =>
+    cart.reduce((sum, item) => {
+      if (item.id !== productId || item.selectedSize !== selectedSize || item.cartKey === excludingCartKey) return sum;
+      return sum + Number(item.quantity || 0);
+    }, 0);
+
+  const getProductSizeStock = (product, selectedSize) => {
+    if (!selectedSize) return Number(product.stock || 0);
+    const matchingSize = (product.sizeStocks || []).find((entry) => entry.size === selectedSize);
+    if (matchingSize) return Number(matchingSize.stock || 0);
+    return Number(product.stock || 0);
+  };
+
+  const getDefaultAvailableSize = (product) => {
+    if (!product?.useSizeSelection) return '';
+    if (Array.isArray(product.sizeStocks) && product.sizeStocks.length > 0) {
+      return product.sizeStocks.find((entry) => Number(entry.stock || 0) > 0)?.size || product.sizeStocks[0]?.size || '';
+    }
+    return product.availableSizes?.[0] || '';
+  };
+
   const getLinkedProducts = (product) => {
     const linkedIds = new Set(product?.linkedProductIds || []);
     return products.filter((item) => linkedIds.has(item.id));
@@ -368,8 +389,14 @@ function POS({
       return false;
     }
 
-    const existingQuantity = getProductQuantityInCart(product.id);
-    if (existingQuantity + normalizedQuantity > Number(product.stock || 0)) {
+    const availableStock = selectedSize
+      ? getProductSizeStock(product, selectedSize)
+      : Number(product.stock || 0);
+    const existingQuantity = selectedSize
+      ? getProductSizeQuantityInCart(product.id, selectedSize)
+      : getProductQuantityInCart(product.id);
+
+    if (existingQuantity + normalizedQuantity > availableStock) {
       const linkedProducts = getLinkedProducts(product);
       if (linkedProducts.length > 0) {
         showNotification('warning', `${product.name} no tiene stock, pero tiene productos conectados.`);
@@ -409,7 +436,7 @@ function POS({
   const addToCart = (product) => {
     if (needsSaleConfiguration(product)) {
       setPendingProductConfig(product);
-      setPendingSaleSize(product.useSizeSelection ? product.availableSizes?.[0] || '' : '');
+      setPendingSaleSize(getDefaultAvailableSize(product));
       setPendingSaleQuantity(product.unitType === 'feet' ? '1' : '1');
       return false;
     }
@@ -428,8 +455,13 @@ function POS({
             : item.quantity + delta;
           const newQuantity = item.unitType === 'feet' ? Math.max(0, nextQuantity) : nextQuantity;
           if (newQuantity <= 0) return null;
-          const otherQuantity = getProductQuantityInCart(item.id, cartKey);
-          if (otherQuantity + newQuantity > Number(item.stock || 0)) {
+          const availableStock = item.selectedSize
+            ? getProductSizeStock(item, item.selectedSize)
+            : Number(item.stock || 0);
+          const otherQuantity = item.selectedSize
+            ? getProductSizeQuantityInCart(item.id, item.selectedSize, cartKey)
+            : getProductQuantityInCart(item.id, cartKey);
+          if (otherQuantity + newQuantity > availableStock) {
             showNotification('error', 'No hay suficiente stock disponible');
             return item;
           }
@@ -448,8 +480,13 @@ function POS({
       prevCart.map((item) => {
         if (item.cartKey !== cartKey) return item;
         const newQuantity = item.unitType === 'feet' ? nextValue : Math.round(nextValue);
-        const otherQuantity = getProductQuantityInCart(item.id, cartKey);
-        if (newQuantity <= 0 || otherQuantity + newQuantity > Number(item.stock || 0)) {
+        const availableStock = item.selectedSize
+          ? getProductSizeStock(item, item.selectedSize)
+          : Number(item.stock || 0);
+        const otherQuantity = item.selectedSize
+          ? getProductSizeQuantityInCart(item.id, item.selectedSize, cartKey)
+          : getProductQuantityInCart(item.id, cartKey);
+        if (newQuantity <= 0 || otherQuantity + newQuantity > availableStock) {
           return item;
         }
         return { ...item, quantity: newQuantity };
@@ -819,17 +856,28 @@ function POS({
       });
 
       const updatedProducts = data.products.map(product => {
-        const soldQuantity = cart.reduce((sum, item) => {
-          if (item.id !== product.id) return sum;
-          return sum + Number(item.quantity || 0);
-        }, 0);
-        if (soldQuantity > 0) {
-          return {
-            ...product,
-            stock: product.stock - soldQuantity
-          };
+        const matchingCartItems = cart.filter((item) => item.id === product.id);
+        if (matchingCartItems.length === 0) return product;
+
+        const soldQuantity = matchingCartItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+        const nextProduct = {
+          ...product,
+          stock: Number(product.stock || 0) - soldQuantity
+        };
+
+        if (Array.isArray(product.sizeStocks) && product.sizeStocks.length > 0) {
+          nextProduct.sizeStocks = product.sizeStocks.map((entry) => {
+            const soldForSize = matchingCartItems.reduce((sum, item) => (
+              item.selectedSize === entry.size ? sum + Number(item.quantity || 0) : sum
+            ), 0);
+            return {
+              ...entry,
+              stock: Math.max(0, Number(entry.stock || 0) - soldForSize)
+            };
+          });
         }
-        return product;
+
+        return nextProduct;
       });
 
       data.sales.unshift(sale);
@@ -1173,7 +1221,11 @@ function POS({
                     <p className="text-xs text-blue-600">Venta por pie</p>
                   )}
                   {product.useSizeSelection && (product.availableSizes || []).length > 0 && (
-                    <p className="text-xs text-purple-600 truncate">Tallas: {product.availableSizes.join(', ')}</p>
+                    <p className="text-xs text-purple-600 truncate">
+                      Tallas: {(product.sizeStocks || []).length > 0
+                        ? product.sizeStocks.map((entry) => `${entry.size} (${entry.stock})`).join(', ')
+                        : product.availableSizes.join(', ')}
+                    </p>
                   )}
                   <p className={`text-xs ${product.stock <= product.lowStockThreshold ? 'text-red-600 font-medium' : 'text-gray-400'}`}>
                     {product.stock <= 0 ? 'Sin stock' : `${formatQuantity(product.stock, product.unitType)} en stock`}
@@ -1758,7 +1810,16 @@ function POS({
                 >
                   <option value="">Selecciona una talla</option>
                   {pendingProductConfig.availableSizes.map((size) => (
-                    <option key={size} value={size}>{size}</option>
+                    <option
+                      key={size}
+                      value={size}
+                      disabled={(pendingProductConfig.sizeStocks || []).length > 0 && getProductSizeStock(pendingProductConfig, size) <= 0}
+                    >
+                      {size}
+                      {(pendingProductConfig.sizeStocks || []).length > 0
+                        ? ` (${getProductSizeStock(pendingProductConfig, size)} disponibles)`
+                        : ''}
+                    </option>
                   ))}
                 </select>
               </div>

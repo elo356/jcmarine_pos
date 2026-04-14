@@ -7,7 +7,8 @@ import {
   generateId,
   saveData,
   normalizeProductTaxConfig,
-  normalizeProductSizes
+  normalizeProductSizes,
+  normalizeProductSizeStocks
 } from '../data/demoData';
 import Modal from '../components/Modal';
 import Input from '../components/Input';
@@ -32,6 +33,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
@@ -93,12 +95,31 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     active: true,
     unitType: 'unit',
     useSizeSelection: false,
-    availableSizesText: '',
+    sizeStocks: [],
     ivuStateEnabled: true,
     ivuMunicipalEnabled: true,
     linkedProductIds: []
   });
   const categoryColorPalette = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316'];
+  const buildEditableSizeStocks = useCallback(
+    (sizeStocks = [], fallbackSizes = [], totalStock = 0) => {
+      const normalized = normalizeProductSizeStocks(sizeStocks, fallbackSizes);
+      if (normalized.length > 0) {
+        return normalized.map((entry) => ({
+          size: entry.size,
+          stock: entry.stock ? String(entry.stock) : ''
+        }));
+      }
+
+      return totalStock > 0 ? [{ size: '', stock: String(totalStock) }] : [{ size: '', stock: '' }];
+    },
+    []
+  );
+
+  const computeSizeStockTotal = useCallback(
+    (sizeStocks = []) => sizeStocks.reduce((sum, entry) => sum + Math.max(0, Number(entry.stock || 0)), 0),
+    []
+  );
 
   useEffect(() => {
     const data = loadData();
@@ -157,7 +178,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [debouncedSearchQuery]);
+  }, [debouncedSearchQuery, selectedCategoryFilter]);
 
   useEffect(() => {
     if (pendingDraft?.productId) {
@@ -186,7 +207,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         active: true,
         unitType: 'unit',
         useSizeSelection: false,
-        availableSizesText: '',
+        sizeStocks: [{ size: '', stock: '' }],
         ivuStateEnabled: true,
         ivuMunicipalEnabled: true,
         linkedProductIds: []
@@ -214,7 +235,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       active: true,
       unitType: 'unit',
       useSizeSelection: false,
-      availableSizesText: '',
+      sizeStocks: [{ size: '', stock: '' }],
       ivuStateEnabled: true,
       ivuMunicipalEnabled: true,
       linkedProductIds: []
@@ -253,7 +274,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
           product.name.toLowerCase().includes(query) ||
           product.barcode.includes(debouncedSearchQuery) ||
           (product.description || '').toLowerCase().includes(query) ||
-          (product.location || '').toLowerCase().includes(query)
+          (product.location || '').toLowerCase().includes(query) ||
+          (product.category || '').toLowerCase().includes(query)
         )
         .map((product) => product.id)
     );
@@ -286,7 +308,12 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     };
   }, [products, debouncedSearchQuery]);
 
-  const filteredProducts = searchResults.products;
+  const filteredProducts = useMemo(
+    () => searchResults.products.filter((product) =>
+      selectedCategoryFilter === 'all' || product.categoryId === selectedCategoryFilter
+    ),
+    [searchResults.products, selectedCategoryFilter]
+  );
   const directMatchIds = searchResults.directMatchIds;
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / PAGE_SIZE));
   const paginatedProducts = useMemo(() => {
@@ -457,7 +484,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         active: product.active,
         unitType: product.unitType === 'feet' ? 'feet' : 'unit',
         useSizeSelection: product.useSizeSelection === true,
-        availableSizesText: (product.availableSizes || []).join(', '),
+        sizeStocks: buildEditableSizeStocks(product.sizeStocks, product.availableSizes, product.stock),
         ivuStateEnabled: product.ivuStateEnabled !== false,
         ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false,
         linkedProductIds: product.linkedProductIds || []
@@ -478,7 +505,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         active: true,
         unitType: 'unit',
         useSizeSelection: false,
-        availableSizesText: '',
+        sizeStocks: [{ size: '', stock: '' }],
         ivuStateEnabled: true,
         ivuMunicipalEnabled: true,
         linkedProductIds: []
@@ -504,7 +531,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       active: true,
       unitType: 'unit',
       useSizeSelection: false,
-      availableSizesText: '',
+      sizeStocks: [{ size: '', stock: '' }],
       ivuStateEnabled: true,
       ivuMunicipalEnabled: true,
       linkedProductIds: []
@@ -514,6 +541,31 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   const closeProductModal = () => {
     setShowModal(false);
     resetProductForm();
+  };
+
+  const updateSizeStockRow = (index, field, value) => {
+    setFormData((current) => ({
+      ...current,
+      sizeStocks: current.sizeStocks.map((entry, entryIndex) =>
+        entryIndex === index ? { ...entry, [field]: value } : entry
+      )
+    }));
+  };
+
+  const addSizeStockRow = () => {
+    setFormData((current) => ({
+      ...current,
+      sizeStocks: [...current.sizeStocks, { size: '', stock: '' }]
+    }));
+  };
+
+  const removeSizeStockRow = (index) => {
+    setFormData((current) => ({
+      ...current,
+      sizeStocks: current.sizeStocks.length === 1
+        ? [{ size: '', stock: '' }]
+        : current.sizeStocks.filter((_, entryIndex) => entryIndex !== index)
+    }));
   };
 
   const syncProductsInBackground = (nextProducts, successMessage, errorMessage, deletedIds = []) => {
@@ -552,9 +604,20 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     }
     
     const category = categories.find(c => c.id === formData.categoryId);
-    const availableSizes = formData.useSizeSelection
-      ? normalizeProductSizes((formData.availableSizesText || '').split(','))
+    const sizeStocks = formData.useSizeSelection
+      ? normalizeProductSizeStocks(formData.sizeStocks)
       : [];
+    const availableSizes = formData.useSizeSelection
+      ? normalizeProductSizes(sizeStocks.map((entry) => entry.size))
+      : [];
+    const computedStock = formData.useSizeSelection
+      ? computeSizeStockTotal(sizeStocks)
+      : parseFloat(formData.stock);
+
+    if (formData.useSizeSelection && sizeStocks.length === 0) {
+      showNotification('error', 'Agrega al menos una talla con cantidad.');
+      return;
+    }
     const currentProducts = products || [];
     if (editingProduct) {
       const linkedProductIds = normalizeLinkedIds(formData.linkedProductIds, editingProduct.id);
@@ -574,13 +637,14 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
             category: category?.name || '',
             price: parseFloat(formData.price),
             cost: parseFloat(formData.cost),
-            stock: parseFloat(formData.stock),
+            stock: computedStock,
             lowStockThreshold: parseFloat(formData.lowStockThreshold),
             description: formData.description,
             active: formData.active,
             unitType: formData.unitType,
             useSizeSelection: formData.useSizeSelection,
             availableSizes,
+            sizeStocks,
             ivuStateEnabled: formData.ivuStateEnabled,
             ivuMunicipalEnabled: formData.ivuMunicipalEnabled,
             linkedProductIds
@@ -624,13 +688,14 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         category: category?.name || '',
         price: parseFloat(formData.price),
         cost: parseFloat(formData.cost),
-        stock: parseFloat(formData.stock),
+        stock: computedStock,
         lowStockThreshold: parseFloat(formData.lowStockThreshold),
         description: formData.description,
         active: formData.active,
         unitType: formData.unitType,
         useSizeSelection: formData.useSizeSelection,
         availableSizes,
+        sizeStocks,
         ivuStateEnabled: formData.ivuStateEnabled,
         ivuMunicipalEnabled: formData.ivuMunicipalEnabled,
         image: null,
@@ -990,6 +1055,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
           unitType: matched?.unitType === 'feet' ? 'feet' : 'unit',
           useSizeSelection: matched?.useSizeSelection === true,
           availableSizes: matched?.availableSizes || [],
+          sizeStocks: matched?.sizeStocks || [],
           ivuStateEnabled: matched?.ivuStateEnabled !== false,
           ivuMunicipalEnabled: matched?.ivuMunicipalEnabled !== false,
           image: matched?.image || null,
@@ -1057,6 +1123,19 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                   className="input w-full pl-10"
                 />
               </div>
+              <select
+                value={selectedCategoryFilter}
+                onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                className="input w-full md:w-56"
+              >
+                <option value="all">Todas las categorías</option>
+                {categories
+                  .slice()
+                  .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'))
+                  .map((category) => (
+                    <option key={category.id} value={category.id}>{category.name}</option>
+                  ))}
+              </select>
               {canManageCategories && (
                 <button
                   type="button"
@@ -1132,6 +1211,11 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                           <div className="max-w-[280px]">
                             <p className="font-medium break-words leading-5">{product.name}</p>
                             <p className="text-sm text-gray-500 break-words">{product.description}</p>
+                            {product.useSizeSelection && (product.sizeStocks || []).length > 0 && (
+                              <p className="text-xs text-purple-600 mt-1 break-words">
+                                Tallas: {product.sizeStocks.map((entry) => `${entry.size} (${entry.stock})`).join(', ')}
+                              </p>
+                            )}
                             {searchQuery.trim() && !directMatchIds.has(product.id) && (
                               <p className="text-xs text-indigo-600 mt-1 font-medium">Resultado relacionado</p>
                             )}
@@ -1160,6 +1244,11 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                         <span className={product.stock <= product.lowStockThreshold ? 'text-red-600 font-bold' : ''}>
                           {product.stock} {product.unitType === 'feet' ? 'pies' : ''}
                         </span>
+                        {product.useSizeSelection && (product.sizeStocks || []).length > 0 && (
+                          <div className="mt-1 text-xs text-gray-500">
+                            {product.sizeStocks.map((entry) => `${entry.size}: ${entry.stock}`).join(' | ')}
+                          </div>
+                        )}
                         {product.stock <= product.lowStockThreshold && (
                           <AlertTriangle size={14} className="inline ml-1 text-red-500" />
                         )}
@@ -1434,9 +1523,10 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
               label={formData.unitType === 'feet' ? 'Stock Inicial (pies)' : 'Stock Inicial'}
               type="number"
               step={formData.unitType === 'feet' ? '0.01' : '1'}
-              value={formData.stock}
+              value={formData.useSizeSelection ? String(computeSizeStockTotal(formData.sizeStocks)) : formData.stock}
               onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-              required
+              required={!formData.useSizeSelection}
+              disabled={formData.useSizeSelection}
               placeholder="0"
             />
             
@@ -1469,7 +1559,9 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                     setFormData({
                       ...formData,
                       useSizeSelection: e.target.checked,
-                      availableSizesText: e.target.checked ? formData.availableSizesText : ''
+                      sizeStocks: e.target.checked
+                        ? (formData.sizeStocks.length > 0 ? formData.sizeStocks : [{ size: '', stock: '' }])
+                        : [{ size: '', stock: '' }]
                     })
                   }
                   className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
@@ -1480,13 +1572,59 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
               </label>
 
               {formData.useSizeSelection && (
-                <div className="md:col-span-2">
-                  <Input
-                    label="Tallas disponibles"
-                    value={formData.availableSizesText}
-                    onChange={(e) => setFormData({ ...formData, availableSizesText: e.target.value })}
-                    placeholder="Ej: XS, S, M, L, XL"
-                  />
+                <div className="md:col-span-2 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Tallas y cantidades</p>
+                      <p className="text-xs text-gray-500">Define cada talla y cuántas unidades hay de esa talla.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addSizeStockRow}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      Agregar talla
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {formData.sizeStocks.map((entry, index) => (
+                      <div key={`size_row_${index}`} className="grid grid-cols-12 gap-2 items-end">
+                        <div className="col-span-7">
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Talla</label>
+                          <input
+                            type="text"
+                            value={entry.size}
+                            onChange={(e) => updateSizeStockRow(index, 'size', e.target.value)}
+                            className="input w-full"
+                            placeholder="Ej: S, M, L, XL"
+                          />
+                        </div>
+                        <div className="col-span-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Cantidad</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={entry.stock}
+                            onChange={(e) => updateSizeStockRow(index, 'stock', e.target.value)}
+                            className="input w-full"
+                            placeholder="0"
+                          />
+                        </div>
+                        <div className="col-span-1">
+                          <button
+                            type="button"
+                            onClick={() => removeSizeStockRow(index)}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                            title="Eliminar talla"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

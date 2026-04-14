@@ -18,6 +18,18 @@ const groupCartItemsByProduct = (cartItems = []) => {
   return grouped;
 };
 
+const reduceProductSizeStocks = (sizeStocks = [], cartItems = []) =>
+  sizeStocks.map((entry) => {
+    const soldForSize = cartItems.reduce((sum, item) => (
+      item.selectedSize === entry.size ? sum + Number(item.quantity || 0) : sum
+    ), 0);
+
+    return {
+      ...entry,
+      stock: Math.max(0, Number(entry.stock || 0) - soldForSize)
+    };
+  });
+
 export const commitSaleTransaction = async ({
   sale,
   paymentEntries = [],
@@ -52,11 +64,18 @@ export const commitSaleTransaction = async ({
       const product = productSnapshot.data();
       const currentStock = Number(product.stock || 0);
       const nextStock = Math.max(0, currentStock - quantity);
+      const productCartItems = cartItems.filter((item) => item.id === productId);
 
-      transaction.update(productRef, {
+      const payload = {
         stock: nextStock,
         updatedAt: new Date().toISOString()
-      });
+      };
+
+      if (Array.isArray(product.sizeStocks) && product.sizeStocks.length > 0) {
+        payload.sizeStocks = reduceProductSizeStocks(product.sizeStocks, productCartItems);
+      }
+
+      transaction.update(productRef, payload);
     }
 
     transaction.set(
