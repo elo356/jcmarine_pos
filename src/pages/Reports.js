@@ -174,10 +174,22 @@ const Reports = () => {
     const methodSales = {
       cash: 0,
       card: 0,
-      ath_movil: 0
+      ath_movil: 0,
+      split: 0
     };
 
     filteredSales.forEach(sale => {
+      if (Array.isArray(sale.payments) && sale.payments.length > 1) {
+        sale.payments.forEach((payment) => {
+          const method = normalizePaymentMethod(payment.method);
+          if (methodSales.hasOwnProperty(method)) {
+            methodSales[method] += Number(payment.amount || 0);
+          }
+        });
+        methodSales.split += getNetSaleTotal(sale);
+        return;
+      }
+
       const method = normalizePaymentMethod(sale.paymentMethod);
       if (methodSales.hasOwnProperty(method)) {
         methodSales[method] += getNetSaleTotal(sale);
@@ -521,7 +533,7 @@ const Reports = () => {
       {/* Payment Methods */}
       <div className="card p-6">
         <h3 className="text-lg font-semibold mb-4">Distribucion por metodo de pago</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="p-4 bg-green-50 rounded-lg text-center">
             <div className="text-2xl font-bold text-green-600">{formatCurrency(paymentMethods.cash)}</div>
             <div className="text-sm text-gray-600 mt-1">Pagos en efectivo</div>
@@ -546,6 +558,15 @@ const Reports = () => {
             <div className="text-xs text-gray-500">
               {metrics.totalRevenue > 0 
                 ? Math.round((paymentMethods.ath_movil / metrics.totalRevenue) * 100) 
+                : 0}% del total
+            </div>
+          </div>
+          <div className="p-4 bg-amber-50 rounded-lg text-center">
+            <div className="text-2xl font-bold text-amber-600">{formatCurrency(paymentMethods.split)}</div>
+            <div className="text-sm text-gray-600 mt-1">Ventas split</div>
+            <div className="text-xs text-gray-500">
+              {metrics.totalRevenue > 0
+                ? Math.round((paymentMethods.split / metrics.totalRevenue) * 100)
                 : 0}% del total
             </div>
           </div>

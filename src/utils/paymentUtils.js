@@ -1,7 +1,8 @@
 export const PAYMENT_METHODS = {
   cash: 'cash',
   card: 'card',
-  athMovil: 'ath_movil'
+  athMovil: 'ath_movil',
+  split: 'split'
 };
 
 const LEGACY_PAYMENT_METHODS = {
@@ -21,6 +22,8 @@ export const getPaymentMethodLabel = (method) => {
       return 'Tarjeta';
     case PAYMENT_METHODS.athMovil:
       return 'ATH Móvil';
+    case PAYMENT_METHODS.split:
+      return 'Split';
     default:
       return method;
   }
@@ -49,7 +52,9 @@ export const buildTransactionRecord = ({
 }) => {
   const createdAt = new Date().toISOString();
   const primaryPayment = paymentEntries[0] || {};
-  const normalizedMethod = normalizePaymentMethod(primaryPayment.method);
+  const normalizedMethod = paymentEntries.length > 1
+    ? PAYMENT_METHODS.split
+    : normalizePaymentMethod(primaryPayment.method);
 
   return {
     id: saleId,

@@ -43,6 +43,12 @@ const IVU_STATE_RATE = 0.105;
 const IVU_MUNICIPAL_RATE = 0.01;
 const SHARED_CART_SYNC_DEBOUNCE_MS = 250;
 const DEFAULT_ITEM_DISCOUNT = { type: 'percentage', value: 0 };
+const DEFAULT_SPLIT_PAYMENT = {
+  method: PAYMENT_METHODS.cash,
+  amount: '',
+  reference: '',
+  cashReceived: ''
+};
 
 const normalizeItemDiscount = (discount = {}) => ({
   type: discount?.type === 'fixed' ? 'fixed' : 'percentage',
@@ -91,6 +97,7 @@ function POS({
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('');
   const [cashReceived, setCashReceived] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
+  const [splitPayments, setSplitPayments] = useState([{ ...DEFAULT_SPLIT_PAYMENT }]);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [cartSyncStatus, setCartSyncStatus] = useState('connecting');
   const [sharedCartMeta, setSharedCartMeta] = useState(DEFAULT_SHARED_POS_CART.meta);
@@ -500,6 +507,7 @@ function POS({
     setSelectedPaymentMethod('');
     setCashReceived('');
     setPaymentReference('');
+    setSplitPayments([{ ...DEFAULT_SPLIT_PAYMENT }]);
     setIsProcessingPayment(false);
   }, []);
 
@@ -931,6 +939,94 @@ function POS({
     );
   };
 
+  const updateSplitPayment = (index, field, value) => {
+    setSplitPayments((current) => current.map((payment, paymentIndex) => {
+      if (paymentIndex !== index) return payment;
+
+      const nextPayment = {
+        ...payment,
+        [field]: value
+      };
+
+      if (field === 'method' && value !== PAYMENT_METHODS.cash) {
+        nextPayment.cashReceived = '';
+      }
+
+      return nextPayment;
+    }));
+  };
+
+  const addSplitPaymentRow = () => {
+    setSplitPayments((current) => [...current, { ...DEFAULT_SPLIT_PAYMENT, method: PAYMENT_METHODS.card }]);
+  };
+
+  const removeSplitPaymentRow = (index) => {
+    setSplitPayments((current) => current.filter((_, paymentIndex) => paymentIndex !== index));
+  };
+
+  const splitAmountTotal = useMemo(
+    () => splitPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
+    [splitPayments]
+  );
+  const splitRemaining = Math.max(total - splitAmountTotal, 0);
+
+  const handleSplitPayment = async () => {
+    if (splitPayments.length < 2) {
+      showNotification('error', 'Agrega al menos dos metodos para usar split.');
+      return;
+    }
+
+    const cashier = profile?.name || user?.email || loadData().currentUser.name;
+    const transactionId = generateId('sale');
+    const paymentEntries = [];
+
+    for (let index = 0; index < splitPayments.length; index += 1) {
+      const payment = splitPayments[index];
+      const amount = Number(payment.amount || 0);
+
+      if (!payment.method || payment.method === PAYMENT_METHODS.split) {
+        showNotification('error', `Selecciona un metodo valido en la linea ${index + 1}.`);
+        return;
+      }
+
+      if (!Number.isFinite(amount) || amount <= 0) {
+        showNotification('error', `Ingresa un monto valido en la linea ${index + 1}.`);
+        return;
+      }
+
+      const isCashPayment = payment.method === PAYMENT_METHODS.cash;
+      const receivedAmount = Number(payment.cashReceived || 0);
+
+      if (isCashPayment && (!Number.isFinite(receivedAmount) || receivedAmount < amount)) {
+        showNotification('error', `El efectivo recibido en la linea ${index + 1} debe cubrir el monto de esa linea.`);
+        return;
+      }
+
+      paymentEntries.push(buildPaymentEntry({
+        transactionId,
+        method: payment.method,
+        amount,
+        confirmedBy: cashier,
+        reference: payment.reference,
+        amountReceived: isCashPayment ? receivedAmount : null,
+        changeDue: isCashPayment ? Math.max(receivedAmount - amount, 0) : null
+      }));
+    }
+
+    if (Math.abs(splitAmountTotal - total) > 0.009) {
+      showNotification('error', 'La suma del split debe ser igual al total de la venta.');
+      return;
+    }
+
+    await finalizePayment(
+      paymentEntries,
+      {
+        openDrawer: paymentEntries.some((payment) => payment.method === PAYMENT_METHODS.cash),
+        successMessage: 'Pago split confirmado y transaccion guardada.'
+      }
+    );
+  };
+
   const getAssignedPrinter = (documentType) => {
     const data = loadData();
     const store = {
@@ -1317,7 +1413,7 @@ function POS({
 
           {!selectedPaymentMethod && (
             <>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <button
                   onClick={() => setSelectedPaymentMethod(PAYMENT_METHODS.cash)}
                   className="card p-6 hover:bg-green-50 hover:border-green-300 text-center transition-colors"
@@ -1341,6 +1437,20 @@ function POS({
                 >
                   <Smartphone size={32} className="mx-auto mb-2 text-purple-600" />
                   <p className="font-medium">ATH Móvil</p>
+                </button>
+                <button
+                  onClick={() => {
+                    setSplitPayments([
+                      { ...DEFAULT_SPLIT_PAYMENT, method: PAYMENT_METHODS.cash },
+                      { ...DEFAULT_SPLIT_PAYMENT, method: PAYMENT_METHODS.card }
+                    ]);
+                    setSelectedPaymentMethod(PAYMENT_METHODS.split);
+                  }}
+                  className="card p-6 hover:bg-amber-50 hover:border-amber-300 text-center transition-colors"
+                  disabled={Boolean(checkoutBlockReason)}
+                >
+                  <CreditCard size={32} className="mx-auto mb-2 text-amber-600" />
+                  <p className="font-medium">Split</p>
                 </button>
               </div>
 
@@ -1489,6 +1599,131 @@ function POS({
                   disabled={isProcessingPayment || Boolean(checkoutBlockReason)}
                 >
                   Confirmar pago ATH
+                </button>
+              </div>
+            </div>
+          )}
+
+          {selectedPaymentMethod === PAYMENT_METHODS.split && (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <p className="font-medium text-amber-800">Pago split</p>
+                <p className="text-sm text-amber-700">Divide el total entre dos o mas metodos. La suma debe ser exacta.</p>
+              </div>
+
+              <div className="space-y-3">
+                {splitPayments.map((payment, index) => (
+                  <div key={`split_${index}`} className="rounded-lg border border-gray-200 p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-medium text-sm text-gray-800">Pago {index + 1}</p>
+                      {splitPayments.length > 2 && (
+                        <button
+                          type="button"
+                          onClick={() => removeSplitPaymentRow(index)}
+                          className="text-sm text-red-600 hover:text-red-700"
+                        >
+                          Eliminar
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Metodo</label>
+                        <select
+                          value={payment.method}
+                          onChange={(e) => updateSplitPayment(index, 'method', e.target.value)}
+                          className="input w-full"
+                        >
+                          <option value={PAYMENT_METHODS.cash}>Efectivo</option>
+                          <option value={PAYMENT_METHODS.card}>Tarjeta</option>
+                          <option value={PAYMENT_METHODS.athMovil}>ATH MÃ³vil</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Monto</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={payment.amount}
+                          onChange={(e) => updateSplitPayment(index, 'amount', e.target.value)}
+                          className="input w-full"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+
+                    {payment.method === PAYMENT_METHODS.cash && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Efectivo recibido</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={payment.cashReceived}
+                          onChange={(e) => updateSplitPayment(index, 'cashReceived', e.target.value)}
+                          className="input w-full"
+                          placeholder="0.00"
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Referencia (opcional)</label>
+                      <input
+                        type="text"
+                        value={payment.reference}
+                        onChange={(e) => updateSplitPayment(index, 'reference', e.target.value)}
+                        className="input w-full"
+                        placeholder="Nota, aprobacion o referencia"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={addSplitPaymentRow}
+                className="w-full btn btn-secondary"
+                disabled={isProcessingPayment}
+              >
+                Agregar metodo
+              </button>
+
+              <div className="rounded-lg bg-gray-50 p-4 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span>Total</span>
+                  <span>{formatCurrency(total)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Asignado</span>
+                  <span>{formatCurrency(splitAmountTotal)}</span>
+                </div>
+                <div className="flex justify-between font-semibold">
+                  <span>Restante</span>
+                  <span className={splitRemaining > 0 ? 'text-amber-600' : 'text-green-600'}>
+                    {formatCurrency(Math.max(total - splitAmountTotal, 0))}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedPaymentMethod('')}
+                  className="flex-1 btn btn-secondary"
+                  disabled={isProcessingPayment}
+                >
+                  Atras
+                </button>
+                <button
+                  onClick={handleSplitPayment}
+                  className="flex-1 btn btn-primary"
+                  disabled={isProcessingPayment || Boolean(checkoutBlockReason)}
+                >
+                  Confirmar split
                 </button>
               </div>
             </div>
@@ -1806,10 +2041,19 @@ function POS({
                 Documento: {selectedPrintDocument === 'invoice' ? 'Factura' : 'Recibo'}
               </p>
               <p className="text-sm text-gray-500">Método de pago: <strong>{getPaymentMethodLabel(lastSale.paymentMethod)}</strong></p>
+              {lastSale.payments?.length > 1 && (
+                <div className="mt-2 space-y-1 text-sm text-gray-500">
+                  {lastSale.payments.map((payment) => (
+                    <p key={payment.id}>
+                      {getPaymentMethodLabel(payment.method)}: <strong>{formatCurrency(payment.amount || 0)}</strong>
+                    </p>
+                  ))}
+                </div>
+              )}
               <p className="text-sm text-gray-500">Estado: <strong>{lastSale.status}</strong></p>
-              {lastSale.payments?.[0]?.amount_received ? (
+              {(lastSale.payments || []).some((payment) => Number(payment.amount_received || 0) > 0) ? (
                 <p className="text-sm text-gray-500">
-                  Cambio: <strong>{formatCurrency(lastSale.payments[0].change_due || 0)}</strong>
+                  Cambio: <strong>{formatCurrency((lastSale.payments || []).reduce((sum, payment) => sum + Number(payment.change_due || 0), 0))}</strong>
                 </p>
               ) : null}
               <p className="text-sm text-gray-500 mt-4">¡Gracias por su compra!</p>

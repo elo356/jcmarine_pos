@@ -247,6 +247,7 @@ function Sales() {
                 <option value="cash">Efectivo</option>
                 <option value="card">Tarjeta</option>
                 <option value="ath_movil">ATH Móvil</option>
+                <option value="split">Split</option>
               </select>
             </div>
           </div>

@@ -129,7 +129,12 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
       <div class="row"><span>IVU estatal</span><strong>${formatCurrency(sale.taxBreakdown?.state || 0)}</strong></div>
       <div class="row"><span>Total</span><strong>${formatCurrency(sale.total)}</strong></div>
       <div class="row"><span>Tipo de pago</span><strong>${getPaymentMethodLabel(sale.paymentMethod)}</strong></div>
-      ${sale.payments?.[0]?.change_due ? `<div class="row"><span>Cambio</span><strong>${formatCurrency(sale.payments[0].change_due)}</strong></div>` : ''}
+      ${(sale.payments || []).length > 1 ? (sale.payments || []).map((payment) => `
+        <div class="row"><span>${getPaymentMethodLabel(payment.method)}</span><strong>${formatCurrency(payment.amount || 0)}</strong></div>
+      `).join('') : ''}
+      ${((sale.payments || []).reduce((sum, payment) => sum + Number(payment.change_due || 0), 0) > 0)
+        ? `<div class="row"><span>Cambio</span><strong>${formatCurrency((sale.payments || []).reduce((sum, payment) => sum + Number(payment.change_due || 0), 0))}</strong></div>`
+        : ''}
     </div>
 
     ${dottedDivider}
