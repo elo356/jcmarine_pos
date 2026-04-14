@@ -827,15 +827,7 @@ function POS({
       cashierId,
       paymentEntries
     });
-
-    try {
-      await commitSaleTransaction({
-        sale,
-        paymentEntries,
-        cartItems: cart,
-        updatedBy: sharedCartEditor
-      });
-
+    const persistSaleLocally = () => {
       const updatedProducts = data.products.map(product => {
         const matchingCartItems = cart.filter((item) => item.id === product.id);
         if (matchingCartItems.length === 0) return product;
@@ -866,6 +858,16 @@ function POS({
       data.products = updatedProducts;
       saveData(data);
       upsertWeeklyCachedSale(sale);
+    };
+
+    try {
+      await commitSaleTransaction({
+        sale,
+        paymentEntries,
+        cartItems: cart,
+        updatedBy: sharedCartEditor
+      });
+      persistSaleLocally();
 
       if (options.openDrawer) {
         openCashDrawer();
@@ -880,9 +882,21 @@ function POS({
       showNotification('success', options.successMessage || 'Pago confirmado y transaccion guardada.');
     } catch (error) {
       console.error('Error finalizing payment:', error);
+      persistSaleLocally();
+
+      if (options.openDrawer) {
+        openCashDrawer();
+      }
+
+      setLastSale(sale);
+      setCart([]);
+      setShowPaymentModal(false);
+      setShowReceiptModal(true);
+      setSelectedPrintDocument('receipt');
+      resetPaymentState();
       showNotification(
-        'error',
-        options.failureMessage || 'No se pudo completar el pago porque Firestore fallo. La venta no fue confirmada.'
+        'warning',
+        options.warningMessage || 'Pago guardado localmente. Firestore fallo, pero la venta no se perdio.'
       );
     } finally {
       setIsProcessingPayment(false);
