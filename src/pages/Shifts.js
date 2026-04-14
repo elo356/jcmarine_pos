@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { Clock, LogIn, LogOut, Coffee, Calendar, DollarSign, Edit2, Trash2, RotateCcw } from 'lucide-react';
+import { Clock, LogIn, LogOut, Coffee, Calendar, DollarSign } from 'lucide-react';
 import { loadData, formatDate, formatDateTime, formatCurrency, formatDuration, generateId } from '../data/demoData';
 import Modal from '../components/Modal';
 import Input from '../components/Input';
@@ -7,19 +7,8 @@ import Notification from '../components/Notification';
 import { useAuth } from '../contexts/AuthContext';
 import { subscribeEmployees } from '../services/employeesService';
 import { subscribeSales } from '../services/salesService';
-import { createShift, deleteShift, patchShift, subscribeShifts } from '../services/shiftsService';
+import { createShift, patchShift, subscribeShifts } from '../services/shiftsService';
 import { getNetSaleTotal, isReportableSale } from '../utils/salesUtils';
-
-const formatDateTimeLocalValue = (value) => {
-  if (!value) return '';
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-
-  const pad = (part) => String(part).padStart(2, '0');
-
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-};
 
 const calculateShiftTotals = (shift, sales, options = {}) => {
   const startValue = options.startTime ?? shift.startTime;
@@ -47,7 +36,7 @@ const calculateShiftTotals = (shift, sales, options = {}) => {
 };
 
 const Shifts = () => {
-  const { user, profile, isAdmin } = useAuth();
+  const { user, profile } = useAuth();
   const isCashier = profile?.role === 'cashier';
   const [shifts, setShifts] = useState([]);
   const [sales, setSales] = useState([]);
@@ -61,15 +50,6 @@ const Shifts = () => {
   const [notification, setNotification] = useState(null);
   const [filterEmployee, setFilterEmployee] = useState('all');
   const [now, setNow] = useState(Date.now());
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editingShift, setEditingShift] = useState(null);
-  const [editForm, setEditForm] = useState({
-    startTime: '',
-    endTime: '',
-    keepOpen: false,
-    status: 'active',
-    notes: ''
-  });
 
   useEffect(() => {
     const intervalId = window.setInterval(() => setNow(Date.now()), 60000);
@@ -157,18 +137,6 @@ const Shifts = () => {
   const closeBreakModal = () => {
     setShowBreakModal(false);
     setBreakNote('');
-  };
-
-  const closeEditModal = () => {
-    setShowEditModal(false);
-    setEditingShift(null);
-    setEditForm({
-      startTime: '',
-      endTime: '',
-      keepOpen: false,
-      status: 'active',
-      notes: ''
-    });
   };
 
   const handleClockIn = async () => {
@@ -282,96 +250,6 @@ const Shifts = () => {
     } catch (error) {
       console.error(error);
       setNotification({ type: 'error', message: 'No se pudo finalizar break en Firestore.' });
-    }
-  };
-
-  const openEditModal = (shift) => {
-    setEditingShift(shift);
-    setEditForm({
-      startTime: formatDateTimeLocalValue(shift.startTime),
-      endTime: formatDateTimeLocalValue(shift.endTime),
-      keepOpen: !shift.endTime,
-      status: shift.status === 'on_break' ? 'on_break' : 'active',
-      notes: shift.notes || ''
-    });
-    setShowEditModal(true);
-  };
-
-  const handleSaveShiftEdit = async () => {
-    if (!editingShift) return;
-
-    const startTime = editForm.startTime ? new Date(editForm.startTime) : null;
-    const endTime = editForm.keepOpen ? null : (editForm.endTime ? new Date(editForm.endTime) : null);
-
-    if (!startTime || Number.isNaN(startTime.getTime())) {
-      setNotification({ type: 'error', message: 'Debes indicar una hora de inicio valida.' });
-      return;
-    }
-
-    if (!editForm.keepOpen && !editForm.endTime) {
-      setNotification({ type: 'error', message: 'Debes indicar una hora de cierre o dejar el turno abierto.' });
-      return;
-    }
-
-    if (endTime && Number.isNaN(endTime.getTime())) {
-      setNotification({ type: 'error', message: 'La hora de cierre no es valida.' });
-      return;
-    }
-
-    if (endTime && endTime < startTime) {
-      setNotification({ type: 'error', message: 'La hora de cierre no puede ser menor que la de inicio.' });
-      return;
-    }
-
-    const payload = {
-      startTime: startTime.toISOString(),
-      endTime: endTime ? endTime.toISOString() : null,
-      status: endTime ? 'completed' : editForm.status,
-      notes: editForm.notes
-    };
-
-    if (endTime) {
-      const { totalHours, totalSales } = calculateShiftTotals(editingShift, sales, payload);
-      payload.totalHours = totalHours;
-      payload.totalSales = totalSales;
-    }
-
-    try {
-      await patchShift(editingShift.id, payload);
-      setNotification({ type: 'success', message: 'Turno actualizado correctamente.' });
-      closeEditModal();
-    } catch (error) {
-      console.error(error);
-      setNotification({ type: 'error', message: 'No se pudo actualizar el turno.' });
-    }
-  };
-
-  const handleReopenShift = async (shift) => {
-    try {
-      await patchShift(shift.id, {
-        endTime: null,
-        status: 'active'
-      });
-      setNotification({
-        type: 'success',
-        message: `El turno de ${shift.employeeName} quedo abierto nuevamente y seguira contando tiempo.`
-      });
-    } catch (error) {
-      console.error(error);
-      setNotification({ type: 'error', message: 'No se pudo reabrir el turno.' });
-    }
-  };
-
-  const handleDeleteShift = async (shift) => {
-    const confirmed = window.confirm(`Se borrara el turno de ${shift.employeeName}. Esta accion no se puede deshacer.`);
-    if (!confirmed) return;
-
-    try {
-      await deleteShift(shift.id);
-      setNotification({ type: 'success', message: 'Turno borrado correctamente.' });
-    } catch (error) {
-      console.error(error);
-      setNotification({ type: 'error', message: 'No se pudo borrar el turno.' });
     }
   };
 
@@ -535,13 +413,12 @@ const Shifts = () => {
                 <th>Net Hours</th>
                 <th>Sales</th>
                 <th>Status</th>
-                {isAdmin && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
               {filteredShifts.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 10 : 9} className="text-center py-8 text-gray-500">No shifts recorded</td>
+                  <td colSpan={9} className="text-center py-8 text-gray-500">No shifts recorded</td>
                 </tr>
               ) : (
                 filteredShifts.map((shift) => {
@@ -573,35 +450,6 @@ const Shifts = () => {
                       <td className="font-medium">{shift.endTime ? `${Number(shift.totalHours || 0).toFixed(2)}h` : getRunningNetHours(shift)}</td>
                       <td>{salesAmount > 0 ? formatCurrency(salesAmount) : '-'}</td>
                       <td>{getStatusBadge(shift)}</td>
-                      {isAdmin && (
-                        <td>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => openEditModal(shift)}
-                              className="btn-secondary px-3 py-2"
-                              title="Editar turno"
-                            >
-                              <Edit2 size={14} />
-                            </button>
-                            {shift.endTime && (
-                              <button
-                                onClick={() => handleReopenShift(shift)}
-                                className="btn-secondary px-3 py-2"
-                                title="Reabrir turno"
-                              >
-                                <RotateCcw size={14} />
-                              </button>
-                            )}
-                            <button
-                              onClick={() => handleDeleteShift(shift)}
-                              className="btn-secondary px-3 py-2 text-red-600"
-                              title="Borrar turno"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </td>
-                      )}
                     </tr>
                   );
                 })
@@ -664,75 +512,6 @@ const Shifts = () => {
               <button onClick={handleStartBreak} className="btn-primary">
                 <Coffee size={16} className="mr-2" />
                 Start Break
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {showEditModal && editingShift && (
-        <Modal isOpen={showEditModal} onClose={closeEditModal} title="Editar turno" size="md">
-          <div className="space-y-4">
-            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-              <p className="text-sm text-gray-600">Empleado</p>
-              <p className="font-semibold text-gray-900">{editingShift.employeeName}</p>
-            </div>
-
-            <Input
-              label="Hora de inicio"
-              type="datetime-local"
-              value={editForm.startTime}
-              onChange={(e) => setEditForm((current) => ({ ...current, startTime: e.target.value }))}
-              required
-            />
-
-            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <input
-                type="checkbox"
-                checked={editForm.keepOpen}
-                onChange={(e) => setEditForm((current) => ({ ...current, keepOpen: e.target.checked }))}
-              />
-              Dejar turno abierto
-            </label>
-
-            {!editForm.keepOpen && (
-              <Input
-                label="Hora de cierre"
-                type="datetime-local"
-                value={editForm.endTime}
-                onChange={(e) => setEditForm((current) => ({ ...current, endTime: e.target.value }))}
-              />
-            )}
-
-            {editForm.keepOpen && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Estado del turno</label>
-                <select
-                  value={editForm.status}
-                  onChange={(e) => setEditForm((current) => ({ ...current, status: e.target.value }))}
-                  className="input"
-                >
-                  <option value="active">Activo</option>
-                  <option value="on_break">En break</option>
-                </select>
-              </div>
-            )}
-
-            <Input
-              label="Notas"
-              value={editForm.notes}
-              onChange={(e) => setEditForm((current) => ({ ...current, notes: e.target.value }))}
-              placeholder="Notas del turno..."
-            />
-
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-              Si reabres un turno que se cerro por error, seguira contando desde la hora en que se habia cerrado y al volverlo a cerrar se recalculara el total completo.
-            </div>
-
-            <div className="flex justify-end gap-2 pt-4">
-              <button onClick={closeEditModal} className="btn-secondary">Cancelar</button>
-              <button onClick={handleSaveShiftEdit} className="btn-primary">
-                Guardar cambios
               </button>
             </div>
           </div>
