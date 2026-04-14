@@ -47,11 +47,7 @@ export const commitSaleTransaction = async ({
   const groupedCartItems = groupCartItemsByProduct(cartItems);
 
   await runTransaction(db, async (transaction) => {
-    transaction.set(doc(db, 'sales', sale.id), sale, { merge: true });
-
-    paymentEntries.forEach((payment) => {
-      transaction.set(doc(db, 'payments', payment.id), payment, { merge: true });
-    });
+    const productUpdates = [];
 
     for (const [productId, quantity] of groupedCartItems.entries()) {
       const productRef = doc(db, 'products', productId);
@@ -76,8 +72,18 @@ export const commitSaleTransaction = async ({
         payload.sizeStocks = reduceProductSizeStocks(product.sizeStocks, productCartItems);
       }
 
-      transaction.update(productRef, payload);
+      productUpdates.push({ productRef, payload });
     }
+
+    transaction.set(doc(db, 'sales', sale.id), sale, { merge: true });
+
+    paymentEntries.forEach((payment) => {
+      transaction.set(doc(db, 'payments', payment.id), payment, { merge: true });
+    });
+
+    productUpdates.forEach(({ productRef, payload }) => {
+      transaction.update(productRef, payload);
+    });
 
     transaction.set(
       doc(db, SHARED_POS_CART_COLLECTION, SHARED_POS_CART_ID),
