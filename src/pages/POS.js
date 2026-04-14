@@ -877,11 +877,9 @@ function POS({
       setShowReceiptModal(true);
       setSelectedPrintDocument('receipt');
       resetPaymentState();
-      setFirestoreReady(true);
       showNotification('success', options.successMessage || 'Pago confirmado y transaccion guardada.');
     } catch (error) {
       console.error('Error finalizing payment:', error);
-      setFirestoreReady(false);
       showNotification(
         'error',
         options.failureMessage || 'No se pudo completar el pago porque Firestore fallo. La venta no fue confirmada.'
