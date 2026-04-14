@@ -23,7 +23,6 @@ import {
 } from '../services/posCartService';
 import { subscribeCategories } from '../services/categoryService';
 import { commitSaleTransaction } from '../services/checkoutService';
-import { verifyFirestoreAvailability } from '../services/firestoreHealthService';
 import { subscribeStoreStatusLogs } from '../services/storeStatusLogService';
 import { upsertWeeklyCachedSale } from '../services/weeklySalesCacheService';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -102,7 +101,6 @@ function POS({
   const [cartSyncStatus, setCartSyncStatus] = useState('connecting');
   const [sharedCartMeta, setSharedCartMeta] = useState(DEFAULT_SHARED_POS_CART.meta);
   const [storeStatusLogs, setStoreStatusLogs] = useState([]);
-  const [firestoreReady, setFirestoreReady] = useState(true);
   const [productsPage, setProductsPage] = useState(1);
   const [pendingProductConfig, setPendingProductConfig] = useState(null);
   const [pendingSaleSize, setPendingSaleSize] = useState('');
@@ -548,12 +546,6 @@ function POS({
     setIsProcessingPayment(false);
   }, []);
 
-  const refreshFirestoreStatus = useCallback(async (force = false) => {
-    const status = await verifyFirestoreAvailability({ force });
-    setFirestoreReady(status.ok);
-    return status.ok;
-  }, []);
-
   const latestStoreLog = useMemo(
     () => [...storeStatusLogs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null,
     [storeStatusLogs]
@@ -566,12 +558,8 @@ function POS({
       return 'La tienda debe estar abierta antes de cobrar.';
     }
 
-    if (!firestoreReady) {
-      return 'Firestore no esta disponible. El POS no permitira cobros hasta que vuelva a responder.';
-    }
-
     return '';
-  }, [firestoreReady, isStoreOpen]);
+  }, [isStoreOpen]);
 
   const ensureCheckoutReady = useCallback(async () => {
     if (!isStoreOpen) {
@@ -579,14 +567,8 @@ function POS({
       return false;
     }
 
-    const firestoreAvailable = await refreshFirestoreStatus(true);
-    if (!firestoreAvailable) {
-      showNotification('error', 'Firestore no esta disponible. No se puede cobrar para evitar perder ventas.');
-      return false;
-    }
-
     return true;
-  }, [isStoreOpen, refreshFirestoreStatus]);
+  }, [isStoreOpen]);
 
   const handleOpenPaymentModal = async () => {
     if (cart.length === 0) {
@@ -610,7 +592,6 @@ function POS({
   };
 
   useEffect(() => {
-    refreshFirestoreStatus();
     const unsubscribe = subscribeStoreStatusLogs(
       (rows) => setStoreStatusLogs(rows || []),
       (error) => {
@@ -619,7 +600,7 @@ function POS({
     );
 
     return () => unsubscribe();
-  }, [refreshFirestoreStatus]);
+  }, []);
 
   useEffect(() => {
     if (cart.length > 0 || isProcessingPayment || !showPaymentModal) return;
