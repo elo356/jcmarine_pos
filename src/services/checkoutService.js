@@ -58,7 +58,8 @@ export const commitSaleTransaction = async ({
       const productSnapshot = await transaction.get(productRef);
 
       if (!productSnapshot.exists()) {
-        throw new Error(`El producto ${productId} no existe en Firestore.`);
+        console.warn(`Skipping Firestore stock update for missing product ${productId}.`);
+        continue;
       }
 
       const product = productSnapshot.data();
