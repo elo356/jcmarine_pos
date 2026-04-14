@@ -1,4 +1,4 @@
-import { collection, doc, onSnapshot, orderBy, query, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, orderBy, query, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 
 const shiftsCol = collection(db, 'shifts');
@@ -21,4 +21,8 @@ export const createShift = async (shift) => {
 
 export const patchShift = async (shiftId, payload) => {
   await updateDoc(doc(db, 'shifts', shiftId), payload);
+};
+
+export const deleteShift = async (shiftId) => {
+  await deleteDoc(doc(db, 'shifts', shiftId));
 };

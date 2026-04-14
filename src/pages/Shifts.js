@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { Clock, LogIn, LogOut, Coffee, Calendar, DollarSign } from 'lucide-react';
+import { Clock, LogIn, LogOut, Coffee, Calendar, DollarSign, Edit2, Trash2, RotateCcw } from 'lucide-react';
 import { loadData, formatDate, formatDateTime, formatCurrency, formatDuration, generateId } from '../data/demoData';
 import Modal from '../components/Modal';
 import Input from '../components/Input';
@@ -7,11 +7,47 @@ import Notification from '../components/Notification';
 import { useAuth } from '../contexts/AuthContext';
 import { subscribeEmployees } from '../services/employeesService';
 import { subscribeSales } from '../services/salesService';
-import { createShift, patchShift, subscribeShifts } from '../services/shiftsService';
+import { createShift, deleteShift, patchShift, subscribeShifts } from '../services/shiftsService';
 import { getNetSaleTotal, isReportableSale } from '../utils/salesUtils';
 
+const formatDateTimeLocalValue = (value) => {
+  if (!value) return '';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const pad = (part) => String(part).padStart(2, '0');
+
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+const calculateShiftTotals = (shift, sales, options = {}) => {
+  const startValue = options.startTime ?? shift.startTime;
+  const endValue = options.endTime ?? shift.endTime;
+  const breakMinutes = Number(options.totalBreakTime ?? shift.totalBreakTime ?? 0);
+
+  const startTime = new Date(startValue);
+  const endTime = endValue ? new Date(endValue) : new Date();
+
+  if (Number.isNaN(startTime.getTime()) || Number.isNaN(endTime.getTime()) || endTime < startTime) {
+    return { totalHours: 0, totalSales: 0 };
+  }
+
+  const totalHours = (endTime - startTime) / (1000 * 60 * 60) - (breakMinutes / 60);
+  const shiftSales = sales.filter((sale) => {
+    const saleDate = new Date(sale.date);
+    return saleDate >= startTime && saleDate <= endTime && isReportableSale(sale);
+  });
+  const totalSales = shiftSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0);
+
+  return {
+    totalHours: Math.max(0, totalHours),
+    totalSales
+  };
+};
+
 const Shifts = () => {
-  const { user, profile } = useAuth();
+  const { user, profile, isAdmin } = useAuth();
   const isCashier = profile?.role === 'cashier';
   const [shifts, setShifts] = useState([]);
   const [sales, setSales] = useState([]);
@@ -24,6 +60,21 @@ const Shifts = () => {
   const [breakNote, setBreakNote] = useState('');
   const [notification, setNotification] = useState(null);
   const [filterEmployee, setFilterEmployee] = useState('all');
+  const [now, setNow] = useState(Date.now());
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingShift, setEditingShift] = useState(null);
+  const [editForm, setEditForm] = useState({
+    startTime: '',
+    endTime: '',
+    keepOpen: false,
+    status: 'active',
+    notes: ''
+  });
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(Date.now()), 60000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   const resolveCurrentEmployee = useCallback((rows) => {
     if (!user) return null;
@@ -108,6 +159,18 @@ const Shifts = () => {
     setBreakNote('');
   };
 
+  const closeEditModal = () => {
+    setShowEditModal(false);
+    setEditingShift(null);
+    setEditForm({
+      startTime: '',
+      endTime: '',
+      keepOpen: false,
+      status: 'active',
+      notes: ''
+    });
+  };
+
   const handleClockIn = async () => {
     const employeeIdToUse = isCashier ? currentEmployee?.id : selectedEmployee;
     if (!employeeIdToUse) {
@@ -147,14 +210,9 @@ const Shifts = () => {
     if (!activeShift) return;
 
     const endTime = new Date();
-    const startTime = new Date(activeShift.startTime);
-    const totalBreakTime = Number(activeShift.totalBreakTime || 0);
-    const totalHours = (endTime - startTime) / (1000 * 60 * 60) - (totalBreakTime / 60);
-    const shiftSales = sales.filter((sale) => {
-      const saleDate = new Date(sale.date);
-      return saleDate >= startTime && saleDate <= endTime && isReportableSale(sale);
+    const { totalHours, totalSales } = calculateShiftTotals(activeShift, sales, {
+      endTime: endTime.toISOString()
     });
-    const totalSales = shiftSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0);
 
     try {
       await patchShift(activeShift.id, {
@@ -227,6 +285,96 @@ const Shifts = () => {
     }
   };
 
+  const openEditModal = (shift) => {
+    setEditingShift(shift);
+    setEditForm({
+      startTime: formatDateTimeLocalValue(shift.startTime),
+      endTime: formatDateTimeLocalValue(shift.endTime),
+      keepOpen: !shift.endTime,
+      status: shift.status === 'on_break' ? 'on_break' : 'active',
+      notes: shift.notes || ''
+    });
+    setShowEditModal(true);
+  };
+
+  const handleSaveShiftEdit = async () => {
+    if (!editingShift) return;
+
+    const startTime = editForm.startTime ? new Date(editForm.startTime) : null;
+    const endTime = editForm.keepOpen ? null : (editForm.endTime ? new Date(editForm.endTime) : null);
+
+    if (!startTime || Number.isNaN(startTime.getTime())) {
+      setNotification({ type: 'error', message: 'Debes indicar una hora de inicio valida.' });
+      return;
+    }
+
+    if (!editForm.keepOpen && !editForm.endTime) {
+      setNotification({ type: 'error', message: 'Debes indicar una hora de cierre o dejar el turno abierto.' });
+      return;
+    }
+
+    if (endTime && Number.isNaN(endTime.getTime())) {
+      setNotification({ type: 'error', message: 'La hora de cierre no es valida.' });
+      return;
+    }
+
+    if (endTime && endTime < startTime) {
+      setNotification({ type: 'error', message: 'La hora de cierre no puede ser menor que la de inicio.' });
+      return;
+    }
+
+    const payload = {
+      startTime: startTime.toISOString(),
+      endTime: endTime ? endTime.toISOString() : null,
+      status: endTime ? 'completed' : editForm.status,
+      notes: editForm.notes
+    };
+
+    if (endTime) {
+      const { totalHours, totalSales } = calculateShiftTotals(editingShift, sales, payload);
+      payload.totalHours = totalHours;
+      payload.totalSales = totalSales;
+    }
+
+    try {
+      await patchShift(editingShift.id, payload);
+      setNotification({ type: 'success', message: 'Turno actualizado correctamente.' });
+      closeEditModal();
+    } catch (error) {
+      console.error(error);
+      setNotification({ type: 'error', message: 'No se pudo actualizar el turno.' });
+    }
+  };
+
+  const handleReopenShift = async (shift) => {
+    try {
+      await patchShift(shift.id, {
+        endTime: null,
+        status: 'active'
+      });
+      setNotification({
+        type: 'success',
+        message: `El turno de ${shift.employeeName} quedo abierto nuevamente y seguira contando tiempo.`
+      });
+    } catch (error) {
+      console.error(error);
+      setNotification({ type: 'error', message: 'No se pudo reabrir el turno.' });
+    }
+  };
+
+  const handleDeleteShift = async (shift) => {
+    const confirmed = window.confirm(`Se borrara el turno de ${shift.employeeName}. Esta accion no se puede deshacer.`);
+    if (!confirmed) return;
+
+    try {
+      await deleteShift(shift.id);
+      setNotification({ type: 'success', message: 'Turno borrado correctamente.' });
+    } catch (error) {
+      console.error(error);
+      setNotification({ type: 'error', message: 'No se pudo borrar el turno.' });
+    }
+  };
+
   const filteredShifts = useMemo(() => {
     if (isCashier && currentEmployee?.id) {
       return shifts.filter((shift) => shift.employeeId === currentEmployee.id);
@@ -251,8 +399,13 @@ const Shifts = () => {
 
   const getActiveDuration = (startTime) => {
     const start = new Date(startTime);
-    const now = new Date();
-    return formatDuration((now - start) / (1000 * 60));
+    const currentTime = new Date(now);
+    return formatDuration((currentTime - start) / (1000 * 60));
+  };
+
+  const getRunningNetHours = (shift) => {
+    const { totalHours } = calculateShiftTotals(shift, sales);
+    return `${totalHours.toFixed(2)}h`;
   };
 
   return (
@@ -382,43 +535,76 @@ const Shifts = () => {
                 <th>Net Hours</th>
                 <th>Sales</th>
                 <th>Status</th>
+                {isAdmin && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
               {filteredShifts.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="text-center py-8 text-gray-500">No shifts recorded</td>
+                  <td colSpan={isAdmin ? 10 : 9} className="text-center py-8 text-gray-500">No shifts recorded</td>
                 </tr>
               ) : (
-                filteredShifts.map((shift) => (
-                  <tr key={shift.id} className="hover:bg-gray-50">
-                    <td>
-                      <div>
-                        <div className="font-medium text-gray-900">{shift.employeeName}</div>
-                        <div className="text-sm text-gray-500">{shift.employeeRole}</div>
-                      </div>
-                    </td>
-                    <td>{formatDate(shift.startTime)}</td>
-                    <td>{formatDateTime(shift.startTime)}</td>
-                    <td>{shift.endTime ? formatDateTime(shift.endTime) : '-'}</td>
-                    <td>
-                      {shift.totalHours
-                        ? formatDuration(shift.totalHours * 60)
-                        : activeShift?.id === shift.id
-                          ? getActiveDuration(shift.startTime)
-                          : '-'}
-                    </td>
-                    <td>
-                      <div>
-                        <div>{(shift.breaks || []).length} breaks</div>
-                        <div className="text-sm text-gray-500">{formatDuration(shift.totalBreakTime || 0)} total</div>
-                      </div>
-                    </td>
-                    <td className="font-medium">{shift.totalHours ? `${shift.totalHours.toFixed(2)}h` : '-'}</td>
-                    <td>{shift.totalSales > 0 ? formatCurrency(shift.totalSales) : '-'}</td>
-                    <td>{getStatusBadge(shift)}</td>
-                  </tr>
-                ))
+                filteredShifts.map((shift) => {
+                  const liveTotals = shift.endTime ? null : calculateShiftTotals(shift, sales);
+                  const salesAmount = shift.endTime ? Number(shift.totalSales || 0) : liveTotals.totalSales;
+
+                  return (
+                    <tr key={shift.id} className="hover:bg-gray-50">
+                      <td>
+                        <div>
+                          <div className="font-medium text-gray-900">{shift.employeeName}</div>
+                          <div className="text-sm text-gray-500">{shift.employeeRole}</div>
+                        </div>
+                      </td>
+                      <td>{formatDate(shift.startTime)}</td>
+                      <td>{formatDateTime(shift.startTime)}</td>
+                      <td>{shift.endTime ? formatDateTime(shift.endTime) : '-'}</td>
+                      <td>
+                        {shift.endTime
+                          ? formatDuration((shift.totalHours || 0) * 60)
+                          : getActiveDuration(shift.startTime)}
+                      </td>
+                      <td>
+                        <div>
+                          <div>{(shift.breaks || []).length} breaks</div>
+                          <div className="text-sm text-gray-500">{formatDuration(shift.totalBreakTime || 0)} total</div>
+                        </div>
+                      </td>
+                      <td className="font-medium">{shift.endTime ? `${Number(shift.totalHours || 0).toFixed(2)}h` : getRunningNetHours(shift)}</td>
+                      <td>{salesAmount > 0 ? formatCurrency(salesAmount) : '-'}</td>
+                      <td>{getStatusBadge(shift)}</td>
+                      {isAdmin && (
+                        <td>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => openEditModal(shift)}
+                              className="btn-secondary px-3 py-2"
+                              title="Editar turno"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            {shift.endTime && (
+                              <button
+                                onClick={() => handleReopenShift(shift)}
+                                className="btn-secondary px-3 py-2"
+                                title="Reabrir turno"
+                              >
+                                <RotateCcw size={14} />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteShift(shift)}
+                              className="btn-secondary px-3 py-2 text-red-600"
+                              title="Borrar turno"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -478,6 +664,75 @@ const Shifts = () => {
               <button onClick={handleStartBreak} className="btn-primary">
                 <Coffee size={16} className="mr-2" />
                 Start Break
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showEditModal && editingShift && (
+        <Modal isOpen={showEditModal} onClose={closeEditModal} title="Editar turno" size="md">
+          <div className="space-y-4">
+            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+              <p className="text-sm text-gray-600">Empleado</p>
+              <p className="font-semibold text-gray-900">{editingShift.employeeName}</p>
+            </div>
+
+            <Input
+              label="Hora de inicio"
+              type="datetime-local"
+              value={editForm.startTime}
+              onChange={(e) => setEditForm((current) => ({ ...current, startTime: e.target.value }))}
+              required
+            />
+
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <input
+                type="checkbox"
+                checked={editForm.keepOpen}
+                onChange={(e) => setEditForm((current) => ({ ...current, keepOpen: e.target.checked }))}
+              />
+              Dejar turno abierto
+            </label>
+
+            {!editForm.keepOpen && (
+              <Input
+                label="Hora de cierre"
+                type="datetime-local"
+                value={editForm.endTime}
+                onChange={(e) => setEditForm((current) => ({ ...current, endTime: e.target.value }))}
+              />
+            )}
+
+            {editForm.keepOpen && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Estado del turno</label>
+                <select
+                  value={editForm.status}
+                  onChange={(e) => setEditForm((current) => ({ ...current, status: e.target.value }))}
+                  className="input"
+                >
+                  <option value="active">Activo</option>
+                  <option value="on_break">En break</option>
+                </select>
+              </div>
+            )}
+
+            <Input
+              label="Notas"
+              value={editForm.notes}
+              onChange={(e) => setEditForm((current) => ({ ...current, notes: e.target.value }))}
+              placeholder="Notas del turno..."
+            />
+
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+              Si reabres un turno que se cerro por error, seguira contando desde la hora en que se habia cerrado y al volverlo a cerrar se recalculara el total completo.
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4">
+              <button onClick={closeEditModal} className="btn-secondary">Cancelar</button>
+              <button onClick={handleSaveShiftEdit} className="btn-primary">
+                Guardar cambios
               </button>
             </div>
           </div>
