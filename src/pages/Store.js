@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Store, LogIn, LogOut, Receipt, DollarSign, CalendarClock, Printer } from 'lucide-react';
+import { Store, LogIn, LogOut, Receipt, DollarSign, CalendarClock, Printer, Calculator } from 'lucide-react';
 import { loadData, formatCurrency, formatDateTime, generateId, normalizePrintSettings } from '../data/demoData';
 import Modal from '../components/Modal';
 import Input from '../components/Input';
@@ -14,11 +14,25 @@ import { buildStoreClosurePrintHtml } from '../utils/printTemplates';
 import { getNetSaleTotal, getSaleRefundTotal, isReportableSale } from '../utils/salesUtils';
 import { printHtmlDocument } from '../services/printService';
 
+const CASH_COUNT_FIELDS = [
+  { key: '100', label: '$100', value: 100 },
+  { key: '50', label: '$50', value: 50 },
+  { key: '20', label: '$20', value: 20 },
+  { key: '10', label: '$10', value: 10 },
+  { key: '5', label: '$5', value: 5 },
+  { key: '1', label: '$1', value: 1 },
+  { key: 'quarter', label: '25c', value: 0.25 },
+  { key: 'dime', label: '10c', value: 0.10 },
+  { key: 'nickel', label: '5c', value: 0.05 },
+  { key: 'penny', label: '1c', value: 0.01 }
+];
+
 const DEFAULT_CLOSE_FORM = {
   actualCashAmount: '',
   paidIn: '',
   paidOut: '',
-  note: ''
+  note: '',
+  cashCountBreakdown: {}
 };
 
 const getNumber = (value) => {
@@ -28,6 +42,13 @@ const getNumber = (value) => {
 
 const roundMoney = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 
+const getCashCountTotal = (cashCountBreakdown = {}) => roundMoney(
+  CASH_COUNT_FIELDS.reduce(
+    (sum, field) => sum + (getNumber(cashCountBreakdown[field.key]) * field.value),
+    0
+  )
+);
+
 const StorePage = () => {
   const { user, profile } = useAuth();
   const [employees, setEmployees] = useState([]);
@@ -35,6 +56,7 @@ const StorePage = () => {
   const [storeStatusLogs, setStoreStatusLogs] = useState([]);
   const [showOpenModal, setShowOpenModal] = useState(false);
   const [showCloseModal, setShowCloseModal] = useState(false);
+  const [showCashCountModal, setShowCashCountModal] = useState(false);
   const [startingCash, setStartingCash] = useState('');
   const [openNote, setOpenNote] = useState('');
   const [closeForm, setCloseForm] = useState(DEFAULT_CLOSE_FORM);
@@ -203,6 +225,11 @@ const StorePage = () => {
     return [...storeStatusLogs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }, [storeStatusLogs]);
 
+  const cashCountTotal = useMemo(
+    () => getCashCountTotal(closeForm.cashCountBreakdown),
+    [closeForm.cashCountBreakdown]
+  );
+
   const handleOpenStore = async () => {
     if (isStoreOpen) {
       setNotification({ type: 'error', message: 'La tienda ya está abierta.' });
@@ -336,6 +363,31 @@ const StorePage = () => {
     }
   };
 
+  const updateCashCountField = (key, value) => {
+    setCloseForm((prev) => ({
+      ...prev,
+      cashCountBreakdown: {
+        ...(prev.cashCountBreakdown || {}),
+        [key]: value
+      }
+    }));
+  };
+
+  const applyCashCountToCloseForm = () => {
+    setCloseForm((prev) => ({
+      ...prev,
+      actualCashAmount: String(getCashCountTotal(prev.cashCountBreakdown))
+    }));
+    setShowCashCountModal(false);
+  };
+
+  const resetCashCount = () => {
+    setCloseForm((prev) => ({
+      ...prev,
+      cashCountBreakdown: {}
+    }));
+  };
+
   const handleCloseStore = async () => {
     if (!activeStoreSession || !closeSummary) {
       setNotification({ type: 'error', message: 'No hay una tienda abierta para cerrar.' });
@@ -381,7 +433,8 @@ const StorePage = () => {
           paidOut: closeSummary.paidOut,
           expectedCashAmount: closeSummary.expectedCashAmount,
           actualCashAmount: closeSummary.actualCashAmount,
-          difference: closeSummary.difference
+          difference: closeSummary.difference,
+          cashCountBreakdown: closeForm.cashCountBreakdown || {}
         },
         sales: {
           grossSales: closeSummary.grossSales,
@@ -417,6 +470,14 @@ const StorePage = () => {
           <h1 className="page-title">Tienda</h1>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={() => setShowCashCountModal(true)}
+            className="btn-secondary"
+            disabled={!isStoreOpen}
+          >
+            <Calculator size={16} className="mr-2" />
+            Calculadora de caja
+          </button>
           <button onClick={() => setShowOpenModal(true)} className="btn-primary" disabled={isStoreOpen}>
             <LogIn size={16} className="mr-2" />
             Abrir tienda
@@ -601,15 +662,25 @@ const StorePage = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input
-                label="Actual Cash Amount"
-                type="number"
-                min="0"
-                step="0.01"
-                value={closeForm.actualCashAmount}
-                onChange={(e) => setCloseForm((prev) => ({ ...prev, actualCashAmount: e.target.value }))}
-                placeholder="0.00"
-              />
+              <div>
+                <Input
+                  label="Actual Cash Amount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={closeForm.actualCashAmount}
+                  onChange={(e) => setCloseForm((prev) => ({ ...prev, actualCashAmount: e.target.value }))}
+                  placeholder="0.00"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCashCountModal(true)}
+                  className="btn btn-secondary w-full -mt-2"
+                >
+                  <Calculator size={16} className="mr-2 inline" />
+                  Calculadora de caja
+                </button>
+              </div>
               <Input
                 label="Paid In"
                 type="number"
@@ -683,6 +754,68 @@ const StorePage = () => {
               <button onClick={handleCloseStore} className="btn-primary">
                 <LogOut size={16} className="mr-2" />
                 Confirmar cierre
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showCashCountModal && (
+        <Modal
+          isOpen={showCashCountModal}
+          onClose={() => setShowCashCountModal(false)}
+          title="Calculadora de caja"
+          size="md"
+        >
+          <div className="space-y-6">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+              <p className="font-medium text-blue-900">Cuenta por denominaciones</p>
+              <p className="text-sm text-blue-700">
+                Escribe cuántos billetes y monedas hay en caja, y el sistema calculará el total automáticamente.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {CASH_COUNT_FIELDS.map((field) => (
+                <Input
+                  key={field.key}
+                  label={field.label}
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={closeForm.cashCountBreakdown?.[field.key] || ''}
+                  onChange={(e) => updateCashCountField(field.key, e.target.value)}
+                  placeholder="0"
+                />
+              ))}
+            </div>
+
+            <div className="rounded-lg bg-gray-50 p-4 space-y-2 text-sm">
+              {CASH_COUNT_FIELDS.map((field) => {
+                const quantity = getNumber(closeForm.cashCountBreakdown?.[field.key]);
+                const subtotal = roundMoney(quantity * field.value);
+                return (
+                  <div key={`subtotal_${field.key}`} className="flex justify-between">
+                    <span>{field.label} x {quantity}</span>
+                    <strong>{formatCurrency(subtotal)}</strong>
+                  </div>
+                );
+              })}
+              <div className="flex justify-between border-t pt-2 text-base">
+                <span>Total contado</span>
+                <strong>{formatCurrency(cashCountTotal)}</strong>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={resetCashCount} className="btn-secondary">
+                Limpiar
+              </button>
+              <button type="button" onClick={() => setShowCashCountModal(false)} className="btn-secondary">
+                Cancelar
+              </button>
+              <button type="button" onClick={applyCashCountToCloseForm} className="btn-primary">
+                Usar total en cierre
               </button>
             </div>
           </div>
