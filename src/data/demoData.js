@@ -3,6 +3,7 @@ import {
   normalizeSpecialOrder,
   normalizeSpecialOrderPayment
 } from '../utils/specialOrderUtils';
+import { mergeWeeklyCachedSales } from '../services/weeklySalesCacheService';
 
 // Datos de demostración - Se guardan en localStorage
 
@@ -531,6 +532,7 @@ export const loadData = () => {
     if (Array.isArray(cleaned.sales)) {
       cleaned.sales = cleaned.sales.map(normalizeSalePaymentData);
     }
+    cleaned.sales = mergeWeeklyCachedSales(cleaned.sales || []);
     cleaned.payments = normalizePayments(cleaned.payments || []);
     cleaned.customers = normalizeCustomers(cleaned.customers || []);
     cleaned.specialOrderPayments = normalizeSpecialOrderPayments(cleaned.specialOrderPayments || []);
@@ -561,6 +563,7 @@ export const loadData = () => {
   if (Array.isArray(data.sales)) {
     data.sales = data.sales.map(normalizeSalePaymentData);
   }
+  data.sales = mergeWeeklyCachedSales(data.sales || []);
   data.payments = normalizePayments(data.payments || []);
   data.customers = normalizeCustomers(data.customers || []);
   data.specialOrderPayments = normalizeSpecialOrderPayments(data.specialOrderPayments || []);

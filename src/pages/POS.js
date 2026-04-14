@@ -12,12 +12,9 @@ import {
 import Modal from '../components/Modal';
 import Notification from '../components/Notification';
 import { useAuth } from '../contexts/AuthContext';
-import { decrementStockForSale, subscribeProducts } from '../services/inventoryService';
-import { saveSale } from '../services/salesService';
-import { savePayments } from '../services/paymentService';
+import { subscribeProducts } from '../services/inventoryService';
 import { openCashDrawer } from '../services/hardwareService';
 import {
-  clearSharedPosCart,
   DEFAULT_SHARED_POS_CART,
   getPersistentTerminalId,
   saveSharedPosCart,
@@ -25,6 +22,10 @@ import {
   subscribeSharedPosCart
 } from '../services/posCartService';
 import { subscribeCategories } from '../services/categoryService';
+import { commitSaleTransaction } from '../services/checkoutService';
+import { verifyFirestoreAvailability } from '../services/firestoreHealthService';
+import { subscribeStoreStatusLogs } from '../services/storeStatusLogService';
+import { upsertWeeklyCachedSale } from '../services/weeklySalesCacheService';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import useIsMobileDevice from '../hooks/useIsMobileDevice';
 import useScannerHidStatus from '../hooks/useScannerHidStatus';
@@ -42,7 +43,6 @@ const IVU_STATE_RATE = 0.105;
 const IVU_MUNICIPAL_RATE = 0.01;
 const SHARED_CART_SYNC_DEBOUNCE_MS = 250;
 const DEFAULT_ITEM_DISCOUNT = { type: 'percentage', value: 0 };
-const FIRESTORE_SYNC_TIMEOUT_MS = 8000;
 
 const normalizeItemDiscount = (discount = {}) => ({
   type: discount?.type === 'fixed' ? 'fixed' : 'percentage',
@@ -73,22 +73,6 @@ const calculateItemPricing = (item) => {
   };
 };
 
-const withTimeout = (promise, timeoutMs, label) => new Promise((resolve, reject) => {
-  const timerId = window.setTimeout(() => {
-    reject(new Error(`Tiempo de espera agotado al sincronizar ${label}.`));
-  }, timeoutMs);
-
-  Promise.resolve(promise)
-    .then((value) => {
-      window.clearTimeout(timerId);
-      resolve(value);
-    })
-    .catch((error) => {
-      window.clearTimeout(timerId);
-      reject(error);
-    });
-});
-
 function POS({
   onCreateProductFromBarcode = () => {},
   onEditProductFromScan = () => {},
@@ -110,6 +94,8 @@ function POS({
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [cartSyncStatus, setCartSyncStatus] = useState('connecting');
   const [sharedCartMeta, setSharedCartMeta] = useState(DEFAULT_SHARED_POS_CART.meta);
+  const [storeStatusLogs, setStoreStatusLogs] = useState([]);
+  const [firestoreReady, setFirestoreReady] = useState(true);
   const [productsPage, setProductsPage] = useState(1);
   const [pendingProductConfig, setPendingProductConfig] = useState(null);
   const [pendingSaleSize, setPendingSaleSize] = useState('');
@@ -517,9 +503,54 @@ function POS({
     setIsProcessingPayment(false);
   }, []);
 
-  const handleOpenPaymentModal = () => {
+  const refreshFirestoreStatus = useCallback(async (force = false) => {
+    const status = await verifyFirestoreAvailability({ force });
+    setFirestoreReady(status.ok);
+    return status.ok;
+  }, []);
+
+  const latestStoreLog = useMemo(
+    () => [...storeStatusLogs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null,
+    [storeStatusLogs]
+  );
+
+  const isStoreOpen = Boolean(latestStoreLog && latestStoreLog.action === 'open');
+
+  const checkoutBlockReason = useMemo(() => {
+    if (!isStoreOpen) {
+      return 'La tienda debe estar abierta antes de cobrar.';
+    }
+
+    if (!firestoreReady) {
+      return 'Firestore no esta disponible. El POS no permitira cobros hasta que vuelva a responder.';
+    }
+
+    return '';
+  }, [firestoreReady, isStoreOpen]);
+
+  const ensureCheckoutReady = useCallback(async () => {
+    if (!isStoreOpen) {
+      showNotification('error', 'Primero abre la tienda antes de cobrar.');
+      return false;
+    }
+
+    const firestoreAvailable = await refreshFirestoreStatus(true);
+    if (!firestoreAvailable) {
+      showNotification('error', 'Firestore no esta disponible. No se puede cobrar para evitar perder ventas.');
+      return false;
+    }
+
+    return true;
+  }, [isStoreOpen, refreshFirestoreStatus]);
+
+  const handleOpenPaymentModal = async () => {
     if (cart.length === 0) {
       showNotification('error', 'El carrito está vacío');
+      return;
+    }
+
+    const canCharge = await ensureCheckoutReady();
+    if (!canCharge) {
       return;
     }
 
@@ -532,6 +563,18 @@ function POS({
     setShowPaymentModal(false);
     resetPaymentState();
   };
+
+  useEffect(() => {
+    refreshFirestoreStatus();
+    const unsubscribe = subscribeStoreStatusLogs(
+      (rows) => setStoreStatusLogs(rows || []),
+      (error) => {
+        console.error('Error subscribing store status logs in POS:', error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [refreshFirestoreStatus]);
 
   useEffect(() => {
     if (cart.length > 0 || isProcessingPayment || !showPaymentModal) return;
@@ -736,6 +779,11 @@ function POS({
       return;
     }
 
+    const canCharge = await ensureCheckoutReady();
+    if (!canCharge) {
+      return;
+    }
+
     setIsProcessingPayment(true);
     const data = loadData();
     const saleId = paymentEntries[0]?.transaction_id || generateId('sale');
@@ -755,6 +803,13 @@ function POS({
     });
 
     try {
+      await commitSaleTransaction({
+        sale,
+        paymentEntries,
+        cartItems: cart,
+        updatedBy: sharedCartEditor
+      });
+
       const updatedProducts = data.products.map(product => {
         const soldQuantity = cart.reduce((sum, item) => {
           if (item.id !== product.id) return sum;
@@ -773,6 +828,7 @@ function POS({
       data.payments = [...paymentEntries, ...(data.payments || [])];
       data.products = updatedProducts;
       saveData(data);
+      upsertWeeklyCachedSale(sale);
 
       if (options.openDrawer) {
         openCashDrawer();
@@ -784,47 +840,15 @@ function POS({
       setShowReceiptModal(true);
       setSelectedPrintDocument('receipt');
       resetPaymentState();
-
-      const syncErrors = [];
-
-      try {
-        await withTimeout(saveSale(sale), FIRESTORE_SYNC_TIMEOUT_MS, 'la venta');
-      } catch (error) {
-        syncErrors.push('venta');
-        console.error('Error saving sale in Firestore from POS:', error);
-      }
-
-      try {
-        await withTimeout(savePayments(paymentEntries), FIRESTORE_SYNC_TIMEOUT_MS, 'los pagos');
-      } catch (error) {
-        syncErrors.push('pagos');
-        console.error('Error saving payments in Firestore from POS:', error);
-      }
-
-      try {
-        await withTimeout(decrementStockForSale(cart), FIRESTORE_SYNC_TIMEOUT_MS, 'el inventario');
-      } catch (error) {
-        syncErrors.push('inventario');
-        console.error('Error updating stock in Firestore from POS:', error);
-      }
-
-      try {
-        await withTimeout(clearSharedPosCart(sharedCartEditor), FIRESTORE_SYNC_TIMEOUT_MS, 'el carrito compartido');
-      } catch (error) {
-        syncErrors.push('carrito');
-        console.error('Error clearing shared cart in Firestore from POS:', error);
-      }
-
-      const synced = syncErrors.length === 0;
-      showNotification(
-        synced ? 'success' : 'warning',
-        synced
-          ? options.successMessage || 'Pago confirmado y transaccion guardada.'
-          : options.warningMessage || `Pago confirmado, pero fallo la sincronizacion con Firestore (${syncErrors.join(', ')}).`
-      );
+      setFirestoreReady(true);
+      showNotification('success', options.successMessage || 'Pago confirmado y transaccion guardada.');
     } catch (error) {
       console.error('Error finalizing payment:', error);
-      showNotification('error', 'No se pudo completar el pago.');
+      setFirestoreReady(false);
+      showNotification(
+        'error',
+        options.failureMessage || 'No se pudo completar el pago porque Firestore fallo. La venta no fue confirmada.'
+      );
     } finally {
       setIsProcessingPayment(false);
     }
@@ -1257,10 +1281,16 @@ function POS({
                 <button
                   onClick={handleOpenPaymentModal}
                   className="w-full mt-4 py-3 btn btn-success flex items-center justify-center gap-2"
+                  disabled={Boolean(checkoutBlockReason)}
                 >
                   <CreditCard size={20} />
-                  Cobrar
+                  {checkoutBlockReason ? 'Cobro bloqueado' : 'Cobrar'}
                 </button>
+                {checkoutBlockReason && (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    {checkoutBlockReason}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1274,6 +1304,12 @@ function POS({
         title="Cobro"
       >
         <div className="space-y-4">
+          {checkoutBlockReason && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              {checkoutBlockReason}
+            </div>
+          )}
+
           <div className="text-center mb-6">
             <p className="text-gray-500">Total a pagar</p>
             <p className="text-4xl font-bold text-green-600">{formatCurrency(total)}</p>
@@ -1285,6 +1321,7 @@ function POS({
                 <button
                   onClick={() => setSelectedPaymentMethod(PAYMENT_METHODS.cash)}
                   className="card p-6 hover:bg-green-50 hover:border-green-300 text-center transition-colors"
+                  disabled={Boolean(checkoutBlockReason)}
                 >
                   <Banknote size={32} className="mx-auto mb-2 text-green-600" />
                   <p className="font-medium">Efectivo</p>
@@ -1292,6 +1329,7 @@ function POS({
                 <button
                   onClick={() => setSelectedPaymentMethod(PAYMENT_METHODS.card)}
                   className="card p-6 hover:bg-blue-50 hover:border-blue-300 text-center transition-colors"
+                  disabled={Boolean(checkoutBlockReason)}
                 >
                   <CreditCard size={32} className="mx-auto mb-2 text-blue-600" />
                   <p className="font-medium">Tarjeta</p>
@@ -1299,6 +1337,7 @@ function POS({
                 <button
                   onClick={() => setSelectedPaymentMethod(PAYMENT_METHODS.athMovil)}
                   className="card p-6 hover:bg-purple-50 hover:border-purple-300 text-center transition-colors"
+                  disabled={Boolean(checkoutBlockReason)}
                 >
                   <Smartphone size={32} className="mx-auto mb-2 text-purple-600" />
                   <p className="font-medium">ATH Móvil</p>
@@ -1373,7 +1412,7 @@ function POS({
                 <button
                   onClick={handleCashPayment}
                   className="flex-1 btn btn-success"
-                  disabled={isProcessingPayment}
+                  disabled={isProcessingPayment || Boolean(checkoutBlockReason)}
                 >
                   Confirmar pago en efectivo
                 </button>
@@ -1410,7 +1449,7 @@ function POS({
                 <button
                   onClick={handleCardPayment}
                   className="flex-1 btn btn-primary"
-                  disabled={isProcessingPayment}
+                  disabled={isProcessingPayment || Boolean(checkoutBlockReason)}
                 >
                   Confirmar pago con tarjeta
                 </button>
@@ -1447,7 +1486,7 @@ function POS({
                 <button
                   onClick={handleAthMovilPayment}
                   className="flex-1 btn btn-primary"
-                  disabled={isProcessingPayment}
+                  disabled={isProcessingPayment || Boolean(checkoutBlockReason)}
                 >
                   Confirmar pago ATH
                 </button>

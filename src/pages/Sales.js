@@ -12,6 +12,7 @@ import {
   saveData
 } from '../data/demoData';
 import { refundSale, subscribeSales } from '../services/salesService';
+import { upsertWeeklyCachedSale } from '../services/weeklySalesCacheService';
 import { getPaymentMethodLabel, normalizePaymentMethod } from '../utils/paymentUtils';
 import {
   getNetSaleTotal,
@@ -194,6 +195,7 @@ function Sales() {
       ...data,
       sales: nextSales
     });
+    upsertWeeklyCachedSale(nextSale);
     setSales(nextSales);
     setSelectedSale(nextSale);
 

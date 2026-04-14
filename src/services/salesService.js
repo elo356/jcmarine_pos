@@ -1,6 +1,7 @@
 import { collection, doc, onSnapshot, orderBy, query, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { getNetSaleTotal, normalizeSaleRefund, normalizeSaleStatus } from '../utils/salesUtils';
+import { mergeWeeklyCachedSales, syncWeeklySalesCache, upsertWeeklyCachedSale } from './weeklySalesCacheService';
 
 const salesCol = collection(db, 'sales');
 
@@ -10,14 +11,19 @@ export const subscribeSales = (onData, onError) => {
     q,
     (snapshot) => {
       const rows = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      onData(rows);
+      syncWeeklySalesCache(rows);
+      onData(mergeWeeklyCachedSales(rows));
     },
-    onError
+    (error) => {
+      onData(mergeWeeklyCachedSales([]));
+      if (onError) onError(error);
+    }
   );
 };
 
 export const saveSale = async (sale) => {
   await setDoc(doc(db, 'sales', sale.id), sale, { merge: true });
+  upsertWeeklyCachedSale(sale);
   return sale;
 };
 

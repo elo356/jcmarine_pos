@@ -7,6 +7,7 @@ import Notification from '../components/Notification';
 import { useAuth } from '../contexts/AuthContext';
 import { subscribeEmployees } from '../services/employeesService';
 import { subscribeSales } from '../services/salesService';
+import { verifyFirestoreAvailability } from '../services/firestoreHealthService';
 import { createStoreStatusLog, subscribeStoreStatusLogs } from '../services/storeStatusLogService';
 import { PAYMENT_METHODS } from '../utils/paymentUtils';
 import { buildStoreClosurePrintHtml } from '../utils/printTemplates';
@@ -38,6 +39,7 @@ const StorePage = () => {
   const [openNote, setOpenNote] = useState('');
   const [closeForm, setCloseForm] = useState(DEFAULT_CLOSE_FORM);
   const [notification, setNotification] = useState(null);
+  const [firestoreReady, setFirestoreReady] = useState(true);
 
   const resolveCurrentEmployee = useCallback((rows) => {
     if (!user) return null;
@@ -63,6 +65,10 @@ const StorePage = () => {
   }, [profile?.name, profile?.role, user]);
 
   useEffect(() => {
+    verifyFirestoreAvailability().then((status) => {
+      setFirestoreReady(status.ok);
+    });
+
     const data = loadData();
     setEmployees(data.employees || []);
     setSales(data.sales || []);
@@ -85,6 +91,21 @@ const StorePage = () => {
       unsubSales();
       unsubStoreStatusLogs();
     };
+  }, []);
+
+  const ensureFirestoreReady = useCallback(async () => {
+    const status = await verifyFirestoreAvailability({ force: true });
+    setFirestoreReady(status.ok);
+
+    if (!status.ok) {
+      setNotification({
+        type: 'error',
+        message: 'Firestore no esta disponible. No se puede abrir o cerrar la tienda hasta que vuelva a responder.'
+      });
+      return false;
+    }
+
+    return true;
   }, []);
 
   const currentEmployee = useMemo(
@@ -188,6 +209,11 @@ const StorePage = () => {
       return;
     }
 
+    const firestoreAvailable = await ensureFirestoreReady();
+    if (!firestoreAvailable) {
+      return;
+    }
+
     const actor = currentEmployee || {
       id: user?.uid || profile?.id || 'unknown',
       name: profile?.name || user?.email || 'Usuario',
@@ -256,6 +282,11 @@ const StorePage = () => {
   const handleCloseStore = async () => {
     if (!activeStoreSession || !closeSummary) {
       setNotification({ type: 'error', message: 'No hay una tienda abierta para cerrar.' });
+      return;
+    }
+
+    const firestoreAvailable = await ensureFirestoreReady();
+    if (!firestoreAvailable) {
       return;
     }
 
@@ -341,6 +372,15 @@ const StorePage = () => {
       </div>
 
       <div className="stats-grid">
+        {!firestoreReady && (
+          <div className="card border border-red-200 bg-red-50 lg:col-span-4">
+            <div className="stat-label text-red-700">Estado de Firebase</div>
+            <div className="stat-value text-red-800">Bloqueado</div>
+            <div className="stat-trend text-red-700">
+              Firestore no esta respondiendo. No abras ni cierres tienda hasta que vuelva.
+            </div>
+          </div>
+        )}
         <div className="card">
           <div className="stat-label">Estado actual</div>
           <div className="stat-value">{isStoreOpen ? 'Abierta' : 'Cerrada'}</div>
