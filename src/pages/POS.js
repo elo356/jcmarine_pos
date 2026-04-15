@@ -38,11 +38,10 @@ import {
   getPaymentMethodLabel,
   PAYMENT_METHODS
 } from '../utils/paymentUtils';
+import { calculateItemPricing, IVU_MUNICIPAL_RATE, IVU_STATE_RATE } from '../utils/cartPricing';
 import { buildSalePrintHtml } from '../utils/printTemplates';
 import { printHtmlDocument } from '../services/printService';
 
-const IVU_STATE_RATE = 0.105;
-const IVU_MUNICIPAL_RATE = 0.01;
 const SHARED_CART_SYNC_DEBOUNCE_MS = 250;
 const DEFAULT_ITEM_DISCOUNT = { type: 'percentage', value: 0 };
 const DEFAULT_SPLIT_PAYMENT = {
@@ -56,30 +55,6 @@ const normalizeItemDiscount = (discount = {}) => ({
   type: discount?.type === 'fixed' ? 'fixed' : 'percentage',
   value: Math.max(0, Number.isFinite(Number(discount?.value)) ? Number(discount.value) : 0)
 });
-
-const calculateItemPricing = (item) => {
-  const quantity = Number(item.quantity || 0);
-  const subtotal = Number(item.price || 0) * quantity;
-  const discount = normalizeItemDiscount(item.discount);
-  const rawDiscountAmount = discount.type === 'percentage'
-    ? subtotal * (discount.value / 100)
-    : discount.value;
-  const discountAmount = Math.min(Math.max(rawDiscountAmount, 0), subtotal);
-  const taxableSubtotal = subtotal - discountAmount;
-  const stateTax = item.ivuStateEnabled !== false ? taxableSubtotal * IVU_STATE_RATE : 0;
-  const municipalTax = item.ivuMunicipalEnabled !== false ? taxableSubtotal * IVU_MUNICIPAL_RATE : 0;
-
-  return {
-    subtotal,
-    discount,
-    discountAmount,
-    taxableSubtotal,
-    stateTax,
-    municipalTax,
-    totalTax: stateTax + municipalTax,
-    total: taxableSubtotal + stateTax + municipalTax
-  };
-};
 
 function POS({
   onCreateProductFromBarcode = () => {},

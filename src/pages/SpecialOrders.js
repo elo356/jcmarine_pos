@@ -31,6 +31,7 @@ import {
   SPECIAL_ORDER_PAYMENT_KIND,
   SPECIAL_ORDER_STATUS
 } from '../utils/specialOrderUtils';
+import { calculateItemPricing, roundMoney } from '../utils/cartPricing';
 
 const TAB_OPTIONS = [
   { id: 'all', label: 'Todos' },
@@ -272,7 +273,9 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
         cost: Number(productData.cost || 0),
         stock: Number(productData.stock || 0),
         lowStockThreshold: 0,
-        description: productData.description || ''
+        description: productData.description || '',
+        ivuStateEnabled: productData.ivuStateEnabled !== false,
+        ivuMunicipalEnabled: productData.ivuMunicipalEnabled !== false
       }
     });
   };
@@ -284,9 +287,22 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     const normalizedItems = items.map((item) => ({
       ...item,
       id: item.id || generateId('special_order_item'),
-      subtotal: Math.round(Number(item.quantity || 0) * Number(item.unitPrice || 0) * 100) / 100
+      subtotal: calculateItemPricing(item).subtotal,
+      taxableSubtotal: calculateItemPricing(item).taxableSubtotal,
+      tax: calculateItemPricing(item).totalTax,
+      taxBreakdown: {
+        state: calculateItemPricing(item).stateTax,
+        municipal: calculateItemPricing(item).municipalTax
+      },
+      total: calculateItemPricing(item).total
     }));
-    const totalAmount = Math.round(normalizedItems.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
+    const subtotalAmount = roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0));
+    const taxBreakdown = {
+      state: roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.taxBreakdown?.state || 0), 0)),
+      municipal: roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.taxBreakdown?.municipal || 0), 0))
+    };
+    const taxAmount = roundMoney(taxBreakdown.state + taxBreakdown.municipal);
+    const totalAmount = roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.total || 0), 0));
 
     try {
       const savedCustomer = await createOrReuseCustomer(customer);
@@ -315,6 +331,9 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
         customerPhone: savedCustomer.phone,
         customerEmail: savedCustomer.email,
         items: normalizedItems,
+        subtotalAmount,
+        taxAmount,
+        taxBreakdown,
         totalAmount,
         depositAmount: paymentSummary.deposit,
         amountPaid: paymentSummary.netPaid,
@@ -394,9 +413,22 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     const normalizedItems = items.map((item) => ({
       ...item,
       id: item.id || generateId('special_order_item'),
-      subtotal: Math.round(Number(item.quantity || 0) * Number(item.unitPrice || 0) * 100) / 100
+      subtotal: calculateItemPricing(item).subtotal,
+      taxableSubtotal: calculateItemPricing(item).taxableSubtotal,
+      tax: calculateItemPricing(item).totalTax,
+      taxBreakdown: {
+        state: calculateItemPricing(item).stateTax,
+        municipal: calculateItemPricing(item).municipalTax
+      },
+      total: calculateItemPricing(item).total
     }));
-    const totalAmount = Math.round(normalizedItems.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
+    const subtotalAmount = roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0));
+    const taxBreakdown = {
+      state: roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.taxBreakdown?.state || 0), 0)),
+      municipal: roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.taxBreakdown?.municipal || 0), 0))
+    };
+    const taxAmount = roundMoney(taxBreakdown.state + taxBreakdown.municipal);
+    const totalAmount = roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.total || 0), 0));
 
     const paymentSummary = calculateSpecialOrderPaymentSummary(editingOrder.payments || [], totalAmount);
     const nextOrder = normalizeSpecialOrder({
@@ -406,6 +438,9 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
       customerPhone: savedCustomer.phone,
       customerEmail: savedCustomer.email,
       items: normalizedItems,
+      subtotalAmount,
+      taxAmount,
+      taxBreakdown,
       totalAmount,
       depositAmount: paymentSummary.deposit,
       amountPaid: paymentSummary.netPaid,

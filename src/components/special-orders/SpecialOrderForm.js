@@ -5,6 +5,7 @@ import Input from '../Input';
 import Select from '../Select';
 import CustomerLookupSection from './CustomerLookupSection';
 import { formatCurrency, getPrimaryProductBarcode, getProductBarcodes } from '../../data/demoData';
+import { calculateItemPricing, IVU_MUNICIPAL_RATE, IVU_STATE_RATE, roundMoney } from '../../utils/cartPricing';
 
 const createEmptyItem = () => ({
   productId: '',
@@ -14,7 +15,9 @@ const createEmptyItem = () => ({
   sku: '',
   quantity: 1,
   unitCost: '',
-  unitPrice: ''
+  unitPrice: '',
+  ivuStateEnabled: true,
+  ivuMunicipalEnabled: true
 });
 
 function SpecialOrderForm({
@@ -48,10 +51,32 @@ function SpecialOrderForm({
   );
 
   const totalAmount = useMemo(
-    () => items.reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.unitPrice || 0)), 0),
+    () => roundMoney(items.reduce((sum, item) => sum + calculateItemPricing(item).total, 0)),
     [items]
   );
-  const balanceDue = Math.max(0, totalAmount - Number(depositAmount || 0));
+  const subtotalAmount = useMemo(
+    () => roundMoney(items.reduce((sum, item) => sum + calculateItemPricing(item).subtotal, 0)),
+    [items]
+  );
+  const taxSummary = useMemo(
+    () => items.reduce((summary, item) => {
+      const pricing = calculateItemPricing(item);
+      return {
+        state: summary.state + pricing.stateTax,
+        municipal: summary.municipal + pricing.municipalTax
+      };
+    }, { state: 0, municipal: 0 }),
+    [items]
+  );
+  const roundedTaxSummary = useMemo(
+    () => ({
+      state: roundMoney(taxSummary.state),
+      municipal: roundMoney(taxSummary.municipal)
+    }),
+    [taxSummary]
+  );
+  const taxAmount = roundMoney(roundedTaxSummary.state + roundedTaxSummary.municipal);
+  const balanceDue = roundMoney(Math.max(0, totalAmount - Number(depositAmount || 0)));
 
   useEffect(() => {
     if (!isOpen) return;
@@ -75,7 +100,9 @@ function SpecialOrderForm({
       sku: item.sku || '',
       quantity: item.quantity || 1,
       unitCost: item.unitCost ?? '',
-      unitPrice: item.unitPrice ?? ''
+      unitPrice: item.unitPrice ?? '',
+      ivuStateEnabled: item.ivuStateEnabled !== false,
+      ivuMunicipalEnabled: item.ivuMunicipalEnabled !== false
     })));
     setDepositAmount(String(initialData.depositAmount || 0));
     setDepositMethod(initialData.depositMethod || initialData.payments?.[0]?.method || 'cash');
@@ -118,7 +145,9 @@ function SpecialOrderForm({
       description: product?.description || '',
       sku: product?.sku || getPrimaryProductBarcode(product) || '',
       unitCost: product?.cost ?? '',
-      unitPrice: product?.price ?? ''
+      unitPrice: product?.price ?? '',
+      ivuStateEnabled: product?.ivuStateEnabled !== false,
+      ivuMunicipalEnabled: product?.ivuMunicipalEnabled !== false
     });
   };
 
@@ -146,7 +175,9 @@ function SpecialOrderForm({
       ...item,
       quantity: Math.max(1, Number(item.quantity || 1)),
       unitCost: Number(item.unitCost || 0),
-      unitPrice: Number(item.unitPrice || 0)
+      unitPrice: Number(item.unitPrice || 0),
+      ivuStateEnabled: item.ivuStateEnabled !== false,
+      ivuMunicipalEnabled: item.ivuMunicipalEnabled !== false
     })).filter((item) => item.name.trim());
 
     if (normalizedItems.length === 0) nextErrors.items = 'Agrega al menos una pieza o producto';
@@ -263,7 +294,9 @@ function SpecialOrderForm({
                       cost: item.unitCost || 0,
                       price: item.unitPrice || 0,
                       stock: 0,
-                      description: item.description || ''
+                      description: item.description || '',
+                      ivuStateEnabled: item.ivuStateEnabled !== false,
+                      ivuMunicipalEnabled: item.ivuMunicipalEnabled !== false
                     })}
                   >
                     Crear como producto nuevo
@@ -318,8 +351,43 @@ function SpecialOrderForm({
                 />
               </div>
 
-              <div className="text-right text-sm text-gray-600">
-                Subtotal del item: <strong>{formatCurrency(Number(item.quantity || 0) * Number(item.unitPrice || 0))}</strong>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-gray-700">IVU del item</p>
+                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={item.ivuStateEnabled !== false}
+                      onChange={(e) => updateItem(index, { ivuStateEnabled: e.target.checked })}
+                      className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    />
+                    <span>{`${(IVU_STATE_RATE * 100).toFixed(1)}% IVU estatal`}</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={item.ivuMunicipalEnabled !== false}
+                      onChange={(e) => updateItem(index, { ivuMunicipalEnabled: e.target.checked })}
+                      className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                    />
+                    <span>{`${(IVU_MUNICIPAL_RATE * 100).toFixed(0)}% IVU municipal`}</span>
+                  </label>
+                </div>
+
+                <div className="text-sm text-gray-600 space-y-1">
+                  <div className="flex justify-between">
+                    <span>Subtotal</span>
+                    <strong>{formatCurrency(calculateItemPricing(item).subtotal)}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>IVU</span>
+                    <strong>{formatCurrency(calculateItemPricing(item).totalTax)}</strong>
+                  </div>
+                  <div className="flex justify-between text-base text-gray-900">
+                    <span>Total</span>
+                    <strong>{formatCurrency(calculateItemPricing(item).total)}</strong>
+                  </div>
+                </div>
               </div>
             </div>
           ))}
@@ -365,6 +433,22 @@ function SpecialOrderForm({
 
         <div className="rounded-lg bg-gray-50 p-4 space-y-2">
           <div className="flex justify-between">
+            <span>Subtotal</span>
+            <strong>{formatCurrency(subtotalAmount)}</strong>
+          </div>
+          <div className="flex justify-between">
+            <span>IVU estatal</span>
+            <strong>{formatCurrency(roundedTaxSummary.state)}</strong>
+          </div>
+          <div className="flex justify-between">
+            <span>IVU municipal</span>
+            <strong>{formatCurrency(roundedTaxSummary.municipal)}</strong>
+          </div>
+          <div className="flex justify-between">
+            <span>IVU total</span>
+            <strong>{formatCurrency(taxAmount)}</strong>
+          </div>
+          <div className="flex justify-between text-base text-gray-900">
             <span>Total del pedido</span>
             <strong>{formatCurrency(totalAmount)}</strong>
           </div>

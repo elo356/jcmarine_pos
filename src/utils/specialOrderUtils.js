@@ -1,3 +1,5 @@
+import { calculateItemPricing, roundMoney } from './cartPricing';
+
 export const SPECIAL_ORDER_STATUS = {
   pending_order: 'pending_order',
   ordered: 'ordered',
@@ -47,7 +49,16 @@ const DEFAULT_ITEM = {
   quantity: 1,
   unitCost: 0,
   unitPrice: 0,
-  subtotal: 0
+  subtotal: 0,
+  taxableSubtotal: 0,
+  tax: 0,
+  taxBreakdown: {
+    state: 0,
+    municipal: 0
+  },
+  total: 0,
+  ivuStateEnabled: true,
+  ivuMunicipalEnabled: true
 };
 
 const generateLocalId = (prefix = 'id') =>
@@ -66,6 +77,22 @@ export const normalizeSpecialOrderItem = (item = {}) => {
   const quantity = Math.max(1, Number(item.quantity || 1));
   const unitCost = Number(item.unitCost || 0);
   const unitPrice = Number(item.unitPrice || 0);
+  const hasStoredTaxConfig = (
+    item.ivuStateEnabled !== undefined ||
+    item.ivuMunicipalEnabled !== undefined ||
+    item.tax !== undefined ||
+    item.taxBreakdown !== undefined ||
+    item.total !== undefined ||
+    item.taxableSubtotal !== undefined
+  );
+  const ivuStateEnabled = item.ivuStateEnabled !== undefined ? item.ivuStateEnabled !== false : false;
+  const ivuMunicipalEnabled = item.ivuMunicipalEnabled !== undefined ? item.ivuMunicipalEnabled !== false : false;
+  const pricing = calculateItemPricing({
+    quantity,
+    unitPrice,
+    ivuStateEnabled,
+    ivuMunicipalEnabled
+  });
 
   return {
     ...DEFAULT_ITEM,
@@ -74,7 +101,16 @@ export const normalizeSpecialOrderItem = (item = {}) => {
     quantity,
     unitCost,
     unitPrice,
-    subtotal: Math.round(quantity * unitPrice * 100) / 100
+    subtotal: roundMoney(item.subtotal ?? pricing.subtotal),
+    taxableSubtotal: roundMoney(item.taxableSubtotal ?? (hasStoredTaxConfig ? pricing.taxableSubtotal : pricing.subtotal)),
+    tax: roundMoney(item.tax ?? (hasStoredTaxConfig ? pricing.totalTax : 0)),
+    taxBreakdown: {
+      state: roundMoney(item.taxBreakdown?.state ?? item.stateTax ?? (hasStoredTaxConfig ? pricing.stateTax : 0)),
+      municipal: roundMoney(item.taxBreakdown?.municipal ?? item.municipalTax ?? (hasStoredTaxConfig ? pricing.municipalTax : 0))
+    },
+    total: roundMoney(item.total ?? (hasStoredTaxConfig ? pricing.total : pricing.subtotal)),
+    ivuStateEnabled,
+    ivuMunicipalEnabled
   };
 };
 
@@ -147,9 +183,21 @@ export const normalizeSpecialOrderStatus = (status) =>
 
 export const normalizeSpecialOrder = (order = {}) => {
   const items = Array.isArray(order.items) ? order.items.map(normalizeSpecialOrderItem) : [];
-  const totalAmount = Math.round(
-    (order.totalAmount ?? order.total_amount ?? items.reduce((sum, item) => sum + item.subtotal, 0)) * 100
-  ) / 100;
+  const subtotalAmount = roundMoney(
+    order.subtotalAmount ?? order.subtotal_amount ?? items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
+  );
+  const taxBreakdown = {
+    state: roundMoney(
+      order.taxBreakdown?.state ?? order.tax_breakdown?.state ?? order.taxState ?? order.tax_state ?? items.reduce((sum, item) => sum + Number(item.taxBreakdown?.state || 0), 0)
+    ),
+    municipal: roundMoney(
+      order.taxBreakdown?.municipal ?? order.tax_breakdown?.municipal ?? order.taxMunicipal ?? order.tax_municipal ?? items.reduce((sum, item) => sum + Number(item.taxBreakdown?.municipal || 0), 0)
+    )
+  };
+  const taxAmount = roundMoney(order.taxAmount ?? order.tax_amount ?? order.tax ?? (taxBreakdown.state + taxBreakdown.municipal));
+  const totalAmount = roundMoney(
+    order.totalAmount ?? order.total_amount ?? (subtotalAmount + taxAmount)
+  );
   const payments = Array.isArray(order.payments) ? order.payments.map(normalizeSpecialOrderPayment) : [];
   const paymentSummary = calculateSpecialOrderPaymentSummary(payments, totalAmount);
 
@@ -161,6 +209,9 @@ export const normalizeSpecialOrder = (order = {}) => {
     customerPhone: order.customerPhone || order.customer_phone || '',
     customerEmail: order.customerEmail || order.customer_email || '',
     items,
+    subtotalAmount,
+    taxAmount,
+    taxBreakdown,
     totalAmount,
     depositAmount: Number(order.depositAmount || order.deposit_amount || paymentSummary.deposit || 0),
     amountPaid: Number(order.amountPaid || order.amount_paid || paymentSummary.netPaid || 0),

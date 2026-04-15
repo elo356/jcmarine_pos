@@ -220,8 +220,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         unitType: 'unit',
         useSizeSelection: false,
         sizeStocks: [{ size: '', stock: '' }],
-        ivuStateEnabled: true,
-        ivuMunicipalEnabled: true,
+        ivuStateEnabled: template.ivuStateEnabled !== false,
+        ivuMunicipalEnabled: template.ivuMunicipalEnabled !== false,
         linkedProductIds: []
       });
       setShowModal(true);

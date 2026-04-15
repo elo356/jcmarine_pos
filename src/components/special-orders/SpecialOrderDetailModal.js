@@ -83,6 +83,14 @@ function SpecialOrderDetailModal({
             <h3 className="font-semibold mb-3">Cobros</h3>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
+                <span>Subtotal</span>
+                <strong>{formatCurrency(order.subtotalAmount || 0)}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>IVU</span>
+                <strong>{formatCurrency(order.taxAmount || 0)}</strong>
+              </div>
+              <div className="flex justify-between">
                 <span>Total</span>
                 <strong>{formatCurrency(order.totalAmount)}</strong>
               </div>
@@ -149,6 +157,8 @@ function SpecialOrderDetailModal({
                   <th>Costo</th>
                   <th>Precio</th>
                   <th>Subtotal</th>
+                  <th>IVU</th>
+                  <th>Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -163,6 +173,8 @@ function SpecialOrderDetailModal({
                     <td>{formatCurrency(item.unitCost || 0)}</td>
                     <td>{formatCurrency(item.unitPrice || 0)}</td>
                     <td>{formatCurrency(item.subtotal || 0)}</td>
+                    <td>{formatCurrency(item.tax || 0)}</td>
+                    <td>{formatCurrency(item.total || 0)}</td>
                   </tr>
                 ))}
               </tbody>
