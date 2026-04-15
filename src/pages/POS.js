@@ -1276,7 +1276,7 @@ function POS({
 
         {/* Cart Section */}
         <div className="lg:col-span-1">
-          <div className="card p-6 sticky top-4">
+          <div className="card sticky top-4 flex flex-col p-6 lg:max-h-[calc(100vh-2rem)]">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold flex items-center gap-2">
                 <ShoppingCart size={20} />
@@ -1306,15 +1306,15 @@ function POS({
             </div>
 
             {cart.length === 0 ? (
-              <div className="text-center py-12 text-gray-400">
+              <div className="flex-1 py-12 text-center text-gray-400">
                 <ShoppingCart size={48} className="mx-auto mb-3" />
                 <p>Carrito vacío</p>
                 <p className="text-sm">Agrega productos para continuar</p>
               </div>
             ) : (
-              <>
+              <div className="flex min-h-0 flex-1 flex-col">
                 {/* Cart Items */}
-                <div className="space-y-3 max-h-64 overflow-y-auto mb-4">
+                <div className="mb-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
                   {cartPricing.map((item) => (
                     <div key={item.cartKey} className="rounded-lg bg-gray-50 p-3">
                       <div className="flex items-start gap-3">
@@ -1464,7 +1464,7 @@ function POS({
                     {checkoutBlockReason}
                   </div>
                 )}
-              </>
+              </div>
             )}
           </div>
         </div>
