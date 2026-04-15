@@ -21,6 +21,7 @@ import Dashboard from './pages/Dashboard';
 import POS from './pages/POS';
 import Products from './pages/Products';
 import Sales from './pages/Sales';
+import Notes from './pages/Notes';
 import Inventory from './pages/Inventory';
 import Shifts from './pages/Shifts';
 import StorePage from './pages/Store';
@@ -41,6 +42,7 @@ const SIDEBAR_ITEMS = [
   { id: 'pos', label: 'Punto de Venta', icon: ShoppingCart },
   { id: 'products', label: 'Productos', icon: Package },
   { id: 'sales', label: 'Ventas', icon: DollarSign },
+  { id: 'notes', label: 'Notas', icon: ClipboardList },
   { id: 'special_orders', label: 'Pedidos especiales', icon: ClipboardList },
   { id: 'inventory', label: 'Inventario', icon: Warehouse },
   { id: 'shifts', label: 'Turnos', icon: Clock },
@@ -123,6 +125,8 @@ function App() {
         );
       case 'sales':
         return <Sales />;
+      case 'notes':
+        return <Notes />;
       case 'special_orders':
         return (
           <SpecialOrders

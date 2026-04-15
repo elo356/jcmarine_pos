@@ -515,6 +515,18 @@ function POS({
     );
   };
 
+  const updateItemTaxPreference = (cartKey, field, shouldRemoveTax) => {
+    setCart((prevCart) =>
+      prevCart.map((item) => {
+        if (item.cartKey !== cartKey) return item;
+        return {
+          ...item,
+          [field]: !shouldRemoveTax
+        };
+      })
+    );
+  };
+
   const cartPricing = useMemo(
     () => cart.map((item) => ({ ...item, pricing: calculateItemPricing(item) })),
     [cart]
@@ -1323,6 +1335,26 @@ function POS({
                         <p className="text-xs text-gray-500">
                           {item.unitType === 'feet' ? `${formatCurrency(item.price)} por pie` : `${formatCurrency(item.price)} c/u`}
                         </p>
+                        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <label className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={item.ivuStateEnabled === false}
+                              onChange={(e) => updateItemTaxPreference(item.cartKey, 'ivuStateEnabled', e.target.checked)}
+                              className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                            />
+                            <span>Quitar IVU estatal</span>
+                          </label>
+                          <label className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700">
+                            <input
+                              type="checkbox"
+                              checked={item.ivuMunicipalEnabled === false}
+                              onChange={(e) => updateItemTaxPreference(item.cartKey, 'ivuMunicipalEnabled', e.target.checked)}
+                              className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                            />
+                            <span>Quitar IVU municipal</span>
+                          </label>
+                        </div>
                         </div>
                         <button
                           onClick={() => removeFromCart(item.cartKey)}
