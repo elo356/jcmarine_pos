@@ -7,6 +7,13 @@ import CustomerLookupSection from './CustomerLookupSection';
 import { formatCurrency, formatQuantity, getPrimaryProductBarcode, getProductBarcodes } from '../../data/demoData';
 import { calculateItemPricing, IVU_MUNICIPAL_RATE, IVU_STATE_RATE, roundMoney } from '../../utils/cartPricing';
 
+const DEFAULT_ITEM_DISCOUNT = { type: 'percentage', value: 0 };
+
+const normalizeItemDiscount = (discount = {}) => ({
+  type: discount?.type === 'fixed' ? 'fixed' : 'percentage',
+  value: Math.max(0, Number.isFinite(Number(discount?.value)) ? Number(discount.value) : 0)
+});
+
 const createEmptyItem = () => ({
   productId: '',
   productSearch: '',
@@ -16,6 +23,7 @@ const createEmptyItem = () => ({
   quantity: 1,
   unitCost: '',
   unitPrice: '',
+  discount: { ...DEFAULT_ITEM_DISCOUNT },
   ivuStateEnabled: true,
   ivuMunicipalEnabled: true
 });
@@ -96,6 +104,10 @@ function SpecialOrderForm({
     [taxSummary]
   );
   const taxAmount = roundMoney(roundedTaxSummary.state + roundedTaxSummary.municipal);
+  const discountAmount = useMemo(
+    () => roundMoney(items.reduce((sum, item) => sum + calculateItemPricing(item).discountAmount, 0)),
+    [items]
+  );
   const balanceDue = roundMoney(Math.max(0, totalAmount - Number(depositAmount || 0)));
 
   useEffect(() => {
@@ -121,6 +133,7 @@ function SpecialOrderForm({
       quantity: item.quantity || 1,
       unitCost: item.unitCost ?? '',
       unitPrice: item.unitPrice ?? '',
+      discount: normalizeItemDiscount(item.discount),
       ivuStateEnabled: item.ivuStateEnabled !== false,
       ivuMunicipalEnabled: item.ivuMunicipalEnabled !== false
     })));
@@ -184,11 +197,12 @@ function SpecialOrderForm({
           productId: product.id,
           productSearch: `${product.name} (${product.sku || getPrimaryProductBarcode(product) || product.id})`,
           name: product.name || '',
-          description: product.description || '',
-          sku: product.sku || getPrimaryProductBarcode(product) || '',
+          description: '',
+          sku: '',
           quantity: 1,
-          unitCost: product.cost ?? '',
+          unitCost: '',
           unitPrice: product.price ?? '',
+          discount: { ...DEFAULT_ITEM_DISCOUNT },
           ivuStateEnabled: product.ivuStateEnabled !== false,
           ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false
         }
@@ -210,6 +224,19 @@ function SpecialOrderForm({
     });
   };
 
+  const updateItemDiscount = (index, field, value) => {
+    setItems((current) => current.map((item, itemIndex) => {
+      if (itemIndex !== index) return item;
+      return {
+        ...item,
+        discount: normalizeItemDiscount({
+          ...item.discount,
+          [field]: value
+        })
+      };
+    }));
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     const nextErrors = {};
@@ -222,6 +249,7 @@ function SpecialOrderForm({
       quantity: Math.max(1, Number(item.quantity || 1)),
       unitCost: Number(item.unitCost || 0),
       unitPrice: Number(item.unitPrice || 0),
+      discount: normalizeItemDiscount(item.discount),
       ivuStateEnabled: item.ivuStateEnabled !== false,
       ivuMunicipalEnabled: item.ivuMunicipalEnabled !== false
     })).filter((item) => item.name.trim());
@@ -379,22 +407,9 @@ function SpecialOrderForm({
                             className="input w-full"
                             placeholder="Nombre del item"
                           />
-                          <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
-                            <input
-                              type="text"
-                              value={item.sku}
-                              onChange={(e) => updateItem(index, { sku: e.target.value })}
-                              className="input w-full"
-                              placeholder="SKU / código"
-                            />
-                            <input
-                              type="text"
-                              value={item.description}
-                              onChange={(e) => updateItem(index, { description: e.target.value })}
-                              className="input w-full"
-                              placeholder="Descripción"
-                            />
-                          </div>
+                          {item.productId && (
+                            <p className="mt-2 text-xs text-gray-500">Producto del catálogo</p>
+                          )}
                         </div>
                         <button
                           type="button"
@@ -451,6 +466,26 @@ function SpecialOrderForm({
                         </div>
                       </div>
 
+                      <div className="flex min-w-0 items-center gap-2">
+                        <select
+                          value={item.discount?.type || DEFAULT_ITEM_DISCOUNT.type}
+                          onChange={(e) => updateItemDiscount(index, 'type', e.target.value)}
+                          className="input w-16 shrink-0 text-sm"
+                        >
+                          <option value="percentage">%</option>
+                          <option value="fixed">$</option>
+                        </select>
+                        <input
+                          type="number"
+                          value={item.discount?.value ?? 0}
+                          onChange={(e) => updateItemDiscount(index, 'value', e.target.value)}
+                          placeholder="Descuento por producto"
+                          className="input min-w-0 flex-1"
+                          min="0"
+                          step="0.01"
+                        />
+                      </div>
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         <label className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700">
                           <input
@@ -478,8 +513,8 @@ function SpecialOrderForm({
                           <p className="font-semibold text-gray-900">{formatCurrency(pricing.subtotal)}</p>
                         </div>
                         <div className="rounded-lg bg-white px-3 py-2 border border-gray-200">
-                          <p className="text-xs text-gray-500">IVU</p>
-                          <p className="font-semibold text-gray-900">{formatCurrency(pricing.totalTax)}</p>
+                          <p className="text-xs text-gray-500">Descuento</p>
+                          <p className="font-semibold text-green-600">-{formatCurrency(pricing.discountAmount)}</p>
                         </div>
                         <div className="rounded-lg bg-white px-3 py-2 border border-gray-200">
                           <p className="text-xs text-gray-500">Total</p>
@@ -558,6 +593,12 @@ function SpecialOrderForm({
             <span>Subtotal</span>
             <strong>{formatCurrency(subtotalAmount)}</strong>
           </div>
+          {discountAmount > 0 && (
+            <div className="flex justify-between text-green-600">
+              <span>Descuento</span>
+              <strong>-{formatCurrency(discountAmount)}</strong>
+            </div>
+          )}
           <div className="flex justify-between">
             <span>IVU estatal</span>
             <strong>{formatCurrency(roundedTaxSummary.state)}</strong>
