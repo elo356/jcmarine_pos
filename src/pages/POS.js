@@ -1276,7 +1276,7 @@ function POS({
 
         {/* Cart Section */}
         <div className="lg:col-span-1">
-          <div className="card sticky top-4 flex flex-col p-6 lg:max-h-[calc(100vh-2rem)]">
+          <div className="card sticky top-4 flex flex-col p-6 lg:max-h-[calc(100vh-5rem)]">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold flex items-center gap-2">
                 <ShoppingCart size={20} />
