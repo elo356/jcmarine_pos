@@ -48,16 +48,41 @@ export const normalizeProductSizeStocks = (sizeStocks = [], fallbackSizes = []) 
   return normalizeProductSizes(fallbackSizes).map((size) => ({ size, stock: 0 }));
 };
 
-export const normalizeProductTaxConfig = (product = {}) => ({
-  ...product,
-  ivuStateEnabled: product.ivuStateEnabled !== false,
-  ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false,
-  unitType: product.unitType === 'feet' ? 'feet' : 'unit',
-  useSizeSelection: product.useSizeSelection === true,
-  sizeStocks: normalizeProductSizeStocks(product.sizeStocks, product.availableSizes),
-  availableSizes: normalizeProductSizeStocks(product.sizeStocks, product.availableSizes).map((entry) => entry.size),
-  location: String(product.location || product.ubicacion || '').trim()
-});
+export const normalizeProductBarcodes = (product = {}) => {
+  const source = Array.isArray(product.barcodes)
+    ? product.barcodes
+    : [product.barcode || product.codigoBarra || ''];
+
+  return [...new Set(source.map((value) => String(value || '').trim()).filter(Boolean))];
+};
+
+export const getProductBarcodes = (product = {}) => normalizeProductBarcodes(product);
+
+export const getPrimaryProductBarcode = (product = {}) => getProductBarcodes(product)[0] || '';
+
+export const productMatchesBarcode = (product = {}, barcode = '') => {
+  const normalizedBarcode = String(barcode || '').trim();
+  if (!normalizedBarcode) return false;
+  return getProductBarcodes(product).some((value) => value === normalizedBarcode);
+};
+
+export const normalizeProductTaxConfig = (product = {}) => {
+  const sizeStocks = normalizeProductSizeStocks(product.sizeStocks, product.availableSizes);
+  const barcodes = normalizeProductBarcodes(product);
+
+  return {
+    ...product,
+    barcode: barcodes[0] || '',
+    barcodes,
+    ivuStateEnabled: product.ivuStateEnabled !== false,
+    ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false,
+    unitType: product.unitType === 'feet' ? 'feet' : 'unit',
+    useSizeSelection: product.useSizeSelection === true,
+    sizeStocks,
+    availableSizes: sizeStocks.map((entry) => entry.size),
+    location: String(product.location || product.ubicacion || '').trim()
+  };
+};
 
 export const normalizePrintSettings = (data = {}) => {
   const printers = Array.isArray(data.printers) ? data.printers : [];

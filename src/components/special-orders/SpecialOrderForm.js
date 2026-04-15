@@ -4,7 +4,7 @@ import Modal from '../Modal';
 import Input from '../Input';
 import Select from '../Select';
 import CustomerLookupSection from './CustomerLookupSection';
-import { formatCurrency } from '../../data/demoData';
+import { formatCurrency, getPrimaryProductBarcode, getProductBarcodes } from '../../data/demoData';
 
 const createEmptyItem = () => ({
   productId: '',
@@ -113,10 +113,10 @@ function SpecialOrderForm({
     const product = activeProducts.find((entry) => entry.id === productId);
     updateItem(index, {
       productId,
-      productSearch: product ? `${product.name} (${product.sku || product.barcode || product.id})` : '',
+      productSearch: product ? `${product.name} (${product.sku || getPrimaryProductBarcode(product) || product.id})` : '',
       name: product?.name || '',
       description: product?.description || '',
-      sku: product?.sku || product?.barcode || '',
+      sku: product?.sku || getPrimaryProductBarcode(product) || '',
       unitCost: product?.cost ?? '',
       unitPrice: product?.price ?? ''
     });
@@ -129,7 +129,7 @@ function SpecialOrderForm({
       [
         product.name,
         product.sku || '',
-        product.barcode || '',
+        ...getProductBarcodes(product),
         product.description || ''
       ].join(' ').toLowerCase().includes(query)
     ).slice(0, 8);
@@ -219,7 +219,7 @@ function SpecialOrderForm({
                 onChange={(e) => handleSelectProduct(index, e.target.value)}
                 options={activeProducts.map((product) => ({
                   value: product.id,
-                  label: `${product.name} (${product.sku || product.barcode || product.id})`
+                  label: `${product.name} (${product.sku || getPrimaryProductBarcode(product) || product.id})`
                 }))}
               />
 
@@ -241,7 +241,7 @@ function SpecialOrderForm({
                     >
                       <div className="font-medium text-gray-900">{product.name}</div>
                       <div className="text-xs text-gray-500">
-                        {product.sku || product.barcode || product.id} · {formatCurrency(product.price || 0)}
+                        {product.sku || getPrimaryProductBarcode(product) || product.id} · {formatCurrency(product.price || 0)}
                       </div>
                     </button>
                   )) : (

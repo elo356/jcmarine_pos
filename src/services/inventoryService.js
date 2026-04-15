@@ -11,14 +11,14 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import { normalizeProductTaxConfig } from '../data/demoData';
+import { getPrimaryProductBarcode, normalizeProductTaxConfig } from '../data/demoData';
 
 const productsCol = collection(db, 'products');
 const logsCol = collection(db, 'inventoryLogs');
 
 const normalizeProduct = (product) => ({
   ...normalizeProductTaxConfig(product),
-  sku: product.sku || product.barcode || product.id,
+  sku: product.sku || getPrimaryProductBarcode(product) || product.id,
   linkedProductIds: Array.isArray(product.linkedProductIds) ? product.linkedProductIds : []
 });
 
@@ -46,7 +46,8 @@ export const saveProductsSnapshot = async (products, deletedIds = []) => {
       doc(db, 'products', product.id),
       {
         ...product,
-        sku: product.sku || product.barcode || product.id,
+        sku: product.sku || getPrimaryProductBarcode(product) || product.id,
+        barcode: getPrimaryProductBarcode(product),
         ivuStateEnabled: product.ivuStateEnabled !== false,
         ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false,
         linkedProductIds: Array.isArray(product.linkedProductIds) ? product.linkedProductIds : [],

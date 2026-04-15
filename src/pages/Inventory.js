@@ -1,6 +1,14 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { Search, Plus, Minus, AlertTriangle, Package, TrendingUp } from 'lucide-react';
-import { loadData, saveData, formatCurrency, formatQuantity, generateId, normalizeProductTaxConfig } from '../data/demoData';
+import {
+  loadData,
+  saveData,
+  formatCurrency,
+  formatQuantity,
+  generateId,
+  getProductBarcodes,
+  normalizeProductTaxConfig
+} from '../data/demoData';
 import Modal from '../components/Modal';
 import Input from '../components/Input';
 import Select from '../components/Select';
@@ -123,7 +131,7 @@ const Inventory = () => {
           .filter((item) =>
             (item.sku || '').toLowerCase().includes(query) ||
             item.name.toLowerCase().includes(query) ||
-            item.barcode.includes(debouncedSearch) ||
+            getProductBarcodes(item).some((barcode) => barcode.includes(debouncedSearch)) ||
             item.category.toLowerCase().includes(query) ||
             (item.description || '').toLowerCase().includes(query) ||
             (item.location || '').toLowerCase().includes(query)
@@ -370,7 +378,7 @@ const Inventory = () => {
                     <td>
                       <div>
                         <div className="font-medium text-gray-900">{item.name}</div>
-                        <div className="text-sm text-gray-500">{item.barcode}</div>
+                        <div className="text-sm text-gray-500">{getProductBarcodes(item).join(', ') || '-'}</div>
                       </div>
                     </td>
                     <td>

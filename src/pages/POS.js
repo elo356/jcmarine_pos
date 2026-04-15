@@ -6,7 +6,10 @@ import {
   formatCurrency,
   formatQuantity,
   generateId,
+  getPrimaryProductBarcode,
+  getProductBarcodes,
   normalizeProductTaxConfig,
+  productMatchesBarcode,
   normalizePrintSettings
 } from '../data/demoData';
 import Modal from '../components/Modal';
@@ -277,7 +280,7 @@ function POS({
           .filter((product) =>
             (product.sku || '').toLowerCase().includes(query) ||
             product.name.toLowerCase().includes(query) ||
-            product.barcode.includes(debouncedSearch) ||
+            getProductBarcodes(product).some((barcode) => barcode.includes(debouncedSearch)) ||
             (product.description || '').toLowerCase().includes(query)
           )
           .map((product) => product.id)
@@ -356,8 +359,8 @@ function POS({
   const openLinkedProductsModal = useCallback((product, barcode = '') => {
     if (!product) return;
     setScannerResult({ type: 'found', product });
-    setScannedBarcode(String(barcode || product.barcode || '').trim());
-    setManualBarcode(String(barcode || product.barcode || '').trim());
+    setScannedBarcode(String(barcode || getPrimaryProductBarcode(product) || '').trim());
+    setManualBarcode(String(barcode || getPrimaryProductBarcode(product) || '').trim());
     setScannerStatus(`Productos conectados para ${product.name}`);
     setScannerError('');
     setShowScannerModal(true);
@@ -663,7 +666,7 @@ function POS({
     setScannedBarcode(normalizedBarcode);
     setManualBarcode(normalizedBarcode);
     const foundProduct = products.find(
-      (product) => String(product.barcode || '').trim() === normalizedBarcode
+      (product) => productMatchesBarcode(product, normalizedBarcode)
     );
 
     if (foundProduct) {
@@ -1967,7 +1970,7 @@ function POS({
                       <div key={linkedProduct.id} className="flex items-center justify-between gap-3 text-sm">
                         <div>
                           <p className="font-medium text-gray-800">{linkedProduct.name}</p>
-                          <p className="text-xs text-gray-500">{linkedProduct.sku || linkedProduct.barcode || '-'}</p>
+                          <p className="text-xs text-gray-500">{linkedProduct.sku || getPrimaryProductBarcode(linkedProduct) || '-'}</p>
                         </div>
                         <button
                           type="button"

@@ -6,7 +6,10 @@ import {
   formatCurrency,
   generateId,
   saveData,
+  getPrimaryProductBarcode,
+  getProductBarcodes,
   normalizeProductTaxConfig,
+  normalizeProductBarcodes,
   normalizeProductSizes,
   normalizeProductSizeStocks
 } from '../data/demoData';
@@ -85,6 +88,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     sku: '',
     name: '',
     barcode: '',
+    barcodes: [''],
     location: '',
     categoryId: '',
     price: '',
@@ -101,6 +105,13 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     linkedProductIds: []
   });
   const categoryColorPalette = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316'];
+  const buildEditableBarcodes = useCallback(
+    (product = {}) => {
+      const barcodes = getProductBarcodes(product);
+      return barcodes.length > 0 ? barcodes : [''];
+    },
+    []
+  );
   const buildEditableSizeStocks = useCallback(
     (sizeStocks = [], fallbackSizes = [], totalStock = 0) => {
       const normalized = normalizeProductSizeStocks(sizeStocks, fallbackSizes);
@@ -196,7 +207,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       setFormData({
         sku: template.sku || '',
         name: template.name || '',
-        barcode: template.barcode || '',
+        barcode: getPrimaryProductBarcode(template),
+        barcodes: buildEditableBarcodes(template),
         location: template.location || '',
         categoryId: template.categoryId || '',
         price: template.price !== undefined ? String(template.price) : '',
@@ -224,7 +236,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     setFormData({
       sku: '',
       name: '',
-      barcode: pendingDraft.barcode,
+      barcode: String(pendingDraft.barcode || '').trim(),
+      barcodes: String(pendingDraft.barcode || '').trim() ? [String(pendingDraft.barcode || '').trim()] : [''],
       location: '',
       categoryId: '',
       price: '',
@@ -242,7 +255,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     });
     setShowModal(true);
     onPendingDraftHandled();
-  }, [pendingDraft, onPendingDraftHandled, products]);
+  }, [buildEditableBarcodes, onPendingDraftHandled, pendingDraft, products]);
 
   const buildAdjacencyMap = (items) => {
     const adjacency = new Map(items.map((p) => [p.id, new Set()]));
@@ -272,7 +285,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         .filter((product) =>
           (product.sku || '').toLowerCase().includes(query) ||
           product.name.toLowerCase().includes(query) ||
-          product.barcode.includes(debouncedSearchQuery) ||
+          getProductBarcodes(product).some((barcode) => barcode.includes(debouncedSearchQuery)) ||
           (product.description || '').toLowerCase().includes(query) ||
           (product.location || '').toLowerCase().includes(query) ||
           (product.category || '').toLowerCase().includes(query)
@@ -364,7 +377,17 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
     stopBarcodeScanner();
     setManualBarcode(normalizedBarcode);
-    setFormData((current) => ({ ...current, barcode: normalizedBarcode }));
+    setFormData((current) => {
+      const nextBarcodes = normalizeProductBarcodes({
+        barcodes: [...(current.barcodes || []), normalizedBarcode]
+      });
+
+      return {
+        ...current,
+        barcode: nextBarcodes[0] || '',
+        barcodes: nextBarcodes.length > 0 ? nextBarcodes : ['']
+      };
+    });
     setShowBarcodeScannerModal(false);
     showNotification('success', `Código leído: ${normalizedBarcode}`);
   }, []);
@@ -473,7 +496,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       setFormData({
         sku: product.sku || '',
         name: product.name,
-        barcode: product.barcode,
+        barcode: getPrimaryProductBarcode(product),
+        barcodes: buildEditableBarcodes(product),
         location: product.location || '',
         categoryId: product.categoryId,
         price: product.price.toString(),
@@ -495,6 +519,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sku: '',
         name: '',
         barcode: '',
+        barcodes: [''],
         location: '',
         categoryId: '',
         price: '',
@@ -521,6 +546,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       sku: '',
       name: '',
       barcode: '',
+      barcodes: [''],
       location: '',
       categoryId: '',
       price: '',
@@ -568,6 +594,43 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     }));
   };
 
+  const updateBarcodeRow = (index, value) => {
+    setFormData((current) => {
+      const nextBarcodes = (current.barcodes || []).map((barcode, barcodeIndex) =>
+        barcodeIndex === index ? value : barcode
+      );
+      const normalized = normalizeProductBarcodes({ barcodes: nextBarcodes });
+      const editable = normalized.length > 0 ? normalized : [''];
+
+      return {
+        ...current,
+        barcode: normalized[0] || '',
+        barcodes: editable
+      };
+    });
+  };
+
+  const addBarcodeRow = () => {
+    setFormData((current) => ({
+      ...current,
+      barcodes: [...(current.barcodes || ['']), '']
+    }));
+  };
+
+  const removeBarcodeRow = (index) => {
+    setFormData((current) => {
+      const remaining = (current.barcodes || []).filter((_, barcodeIndex) => barcodeIndex !== index);
+      const normalized = normalizeProductBarcodes({ barcodes: remaining });
+      const editable = normalized.length > 0 ? normalized : [''];
+
+      return {
+        ...current,
+        barcode: normalized[0] || '',
+        barcodes: editable
+      };
+    });
+  };
+
   const syncProductsInBackground = (nextProducts, successMessage, errorMessage, deletedIds = []) => {
     setProducts(nextProducts);
     const localData = loadData();
@@ -588,8 +651,14 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     e.preventDefault();
 
     const normalizedSku = (formData.sku || '').trim().toUpperCase();
+    const normalizedBarcodes = normalizeProductBarcodes(formData);
     if (!normalizedSku) {
       showNotification('error', 'El SKU es requerido');
+      return;
+    }
+
+    if (normalizedBarcodes.length === 0) {
+      showNotification('error', 'Agrega al menos un código de barras');
       return;
     }
 
@@ -600,6 +669,17 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
     if (duplicateSku) {
       showNotification('error', `El SKU ya existe: ${normalizedSku}`);
+      return;
+    }
+
+    const duplicateBarcode = products.find((product) => {
+      if (editingProduct && product.id === editingProduct.id) return false;
+      return normalizedBarcodes.some((barcode) => getProductBarcodes(product).includes(barcode));
+    });
+
+    if (duplicateBarcode) {
+      const repeatedBarcode = normalizedBarcodes.find((barcode) => getProductBarcodes(duplicateBarcode).includes(barcode));
+      showNotification('error', `El código ${repeatedBarcode} ya existe en ${duplicateBarcode.name}`);
       return;
     }
     
@@ -631,7 +711,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
             ...p,
             sku: normalizedSku,
             name: formData.name,
-            barcode: formData.barcode,
+            barcode: normalizedBarcodes[0] || '',
+            barcodes: normalizedBarcodes,
             location: (formData.location || '').trim().toUpperCase(),
             categoryId: formData.categoryId,
             category: category?.name || '',
@@ -682,7 +763,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         id: newProductId,
         sku: normalizedSku,
         name: formData.name,
-        barcode: formData.barcode,
+        barcode: normalizedBarcodes[0] || '',
+        barcodes: normalizedBarcodes,
         location: (formData.location || '').trim().toUpperCase(),
         categoryId: formData.categoryId,
         category: category?.name || '',
@@ -1007,9 +1089,9 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
           .map((p) => [String(p.sku).trim().toUpperCase(), p])
       );
       const byBarcode = new Map(
-        currentProducts
-          .filter((p) => p.barcode)
-          .map((p) => [String(p.barcode).trim(), p])
+        currentProducts.flatMap((p) =>
+          getProductBarcodes(p).map((barcode) => [String(barcode).trim(), p])
+        )
       );
 
       let created = 0;
@@ -1034,7 +1116,10 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         const payload = {
           sku: normalizedSku || (matched?.sku || ''),
           name: nameRaw.trim(),
-          barcode: normalizedBarcode || (matched?.barcode || ''),
+          barcode: normalizedBarcode || getPrimaryProductBarcode(matched),
+          barcodes: normalizedBarcode
+            ? normalizeProductBarcodes({ barcodes: [...getProductBarcodes(matched), normalizedBarcode] })
+            : getProductBarcodes(matched),
           location: col.location >= 0 ? String(row[col.location] || '').trim().toUpperCase() : (matched?.location || ''),
           categoryId: categoryFound?.id || matched?.categoryId || '',
           category: categoryFound?.name || categoryName || matched?.category || '',
@@ -1070,7 +1155,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
           const newProduct = { id, ...payload };
           currentProducts.push(newProduct);
           if (newProduct.sku) bySku.set(newProduct.sku, newProduct);
-          if (newProduct.barcode) byBarcode.set(newProduct.barcode, newProduct);
+          getProductBarcodes(newProduct).forEach((barcode) => byBarcode.set(barcode, newProduct));
           created += 1;
         }
       });
@@ -1234,7 +1319,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                         </div>
                       </td>
                       <td className="font-mono text-sm">{product.sku || '-'}</td>
-                      <td className="font-mono text-sm">{product.barcode}</td>
+                      <td className="font-mono text-sm">{getProductBarcodes(product).join(', ') || '-'}</td>
                       <td className="font-mono text-sm">{product.location || '-'}</td>
                       <td>
                         <span className="badge badge-info">{product.category}</span>
@@ -1457,10 +1542,10 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
             <div>
               <Input
                 label="Código de Barras"
-                value={formData.barcode}
-                onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                value={formData.barcodes?.[0] || ''}
+                onChange={(e) => updateBarcodeRow(0, e.target.value)}
                 required
-                placeholder="Ej: 1234567890001"
+                placeholder="Principal: Ej. 1234567890001"
               />
               <button
                 type="button"
@@ -1470,6 +1555,37 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                 <Barcode size={18} />
                 {isMobileDevice ? 'Escanear con cámara' : 'Escanear con scanner'}
               </button>
+              <div className="space-y-2 pt-2">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium text-gray-700">CÃ³digos adicionales</p>
+                  <button
+                    type="button"
+                    onClick={addBarcodeRow}
+                    className="text-sm text-blue-600 hover:text-blue-700"
+                  >
+                    Agregar otro
+                  </button>
+                </div>
+                {(formData.barcodes || []).slice(1).map((barcode, index) => (
+                  <div key={`extra_barcode_${index + 1}`} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={barcode}
+                      onChange={(e) => updateBarcodeRow(index + 1, e.target.value)}
+                      className="input flex-1"
+                      placeholder="CÃ³digo adicional"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeBarcodeRow(index + 1)}
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                      title="Eliminar cÃ³digo"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <Input
@@ -1677,7 +1793,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                     return (
                       (product.sku || '').toLowerCase().includes(query) ||
                       product.name.toLowerCase().includes(query) ||
-                      product.barcode.includes(debouncedLinkedSearch) ||
+                      getProductBarcodes(product).some((barcode) => barcode.includes(debouncedLinkedSearch)) ||
                       (product.description || '').toLowerCase().includes(query)
                     );
                   })
