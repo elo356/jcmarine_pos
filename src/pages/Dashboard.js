@@ -110,6 +110,38 @@ function Dashboard() {
     setTopProducts(products.slice(0, 5));
   }, [employees, hydratedSpecialOrders, products, sales, specialOrderPayments]);
 
+  const weeklySalesData = React.useMemo(() => {
+    const labels = ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'];
+    const buckets = labels.map((label) => ({ label, amount: 0, transactions: 0 }));
+
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const day = now.getDay();
+    const mondayOffset = day === 0 ? 6 : day - 1;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - mondayOffset);
+    monday.setHours(0, 0, 0, 0);
+
+    const nextMonday = new Date(monday);
+    nextMonday.setDate(monday.getDate() + 7);
+
+    sales
+      .filter(isReportableSale)
+      .forEach((sale) => {
+        const saleDate = new Date(sale.date || sale.created_at);
+        if (Number.isNaN(saleDate.getTime())) return;
+        if (saleDate < monday || saleDate >= nextMonday) return;
+
+        const dayIndex = (saleDate.getDay() + 6) % 7;
+        buckets[dayIndex].amount += getNetSaleTotal(sale);
+        buckets[dayIndex].transactions += 1;
+      });
+
+    return buckets;
+  }, [sales]);
+
+  const maxWeeklySales = Math.max(...weeklySalesData.map((day) => day.amount), 0);
+
   return (
     <div className="space-y-6">
       {/* Stats Cards */}
@@ -217,20 +249,28 @@ function Dashboard() {
         {/* Weekly Sales Chart */}
         <div className="card p-6">
           <h3 className="text-lg font-semibold mb-4">Ventas de la Semana</h3>
-          <div className="h-64 flex items-end justify-around gap-2">
-            {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((day, i) => {
-              const heights = [120, 180, 150, 200, 170, 250, 220];
-              return (
-                <div key={day} className="flex flex-col items-center gap-2">
-                  <div 
+          {weeklySalesData.some((day) => day.amount > 0) ? (
+            <div className="h-64 flex items-end justify-around gap-2">
+              {weeklySalesData.map((day) => (
+                <div key={day.label} className="flex flex-col items-center gap-2">
+                  <div
                     className="w-10 bg-gradient-to-t from-blue-600 to-blue-400 rounded-t-lg transition-all hover:from-blue-700 hover:to-blue-500 cursor-pointer"
-                    style={{ height: `${heights[i]}px` }}
+                    style={{
+                      height: `${maxWeeklySales > 0 ? (day.amount / maxWeeklySales) * 220 : 0}px`,
+                      minHeight: day.amount > 0 ? '6px' : '0'
+                    }}
+                    title={`${day.label}: ${formatCurrency(day.amount)} (${day.transactions} transacciones)`}
                   />
-                  <span className="text-xs text-gray-500 font-medium">{day}</span>
+                  <span className="text-xs text-gray-500 font-medium">{day.label}</span>
+                  <span className="text-[11px] text-gray-600">{formatCurrency(day.amount)}</span>
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="h-64 flex items-center justify-center text-gray-500">
+              No hay ventas reportables en la semana actual
+            </div>
+          )}
         </div>
 
         {/* Top Products */}

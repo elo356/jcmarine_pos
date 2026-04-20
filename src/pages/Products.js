@@ -50,6 +50,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedLinkedProductId, setExpandedLinkedProductId] = useState('');
   const [showBarcodeScannerModal, setShowBarcodeScannerModal] = useState(false);
+  const [activeBarcodeFieldIndex, setActiveBarcodeFieldIndex] = useState(0);
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [deleteAllPassword, setDeleteAllPassword] = useState('');
   const [deletingAll, setDeletingAll] = useState(false);
@@ -375,34 +376,47 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     const normalizedBarcode = String(barcode || '').trim();
     if (!normalizedBarcode) return;
 
-    stopBarcodeScanner();
     setManualBarcode(normalizedBarcode);
     setFormData((current) => {
-      const nextBarcodes = normalizeProductBarcodes({
-        barcodes: [...(current.barcodes || []), normalizedBarcode]
-      });
+      const editableBarcodes = [...(current.barcodes || [''])];
+
+      while (editableBarcodes.length <= activeBarcodeFieldIndex) {
+        editableBarcodes.push('');
+      }
+
+      editableBarcodes[activeBarcodeFieldIndex] = normalizedBarcode;
+      const nextBarcodes = normalizeProductBarcodes({ barcodes: editableBarcodes });
+      const nextEditable = [...nextBarcodes];
+
+      while (nextEditable.length <= activeBarcodeFieldIndex) {
+        nextEditable.push('');
+      }
 
       return {
         ...current,
         barcode: nextBarcodes[0] || '',
-        barcodes: nextBarcodes.length > 0 ? nextBarcodes : ['']
+        barcodes: nextEditable.length > 0 ? nextEditable : ['']
       };
     });
-    setShowBarcodeScannerModal(false);
-    showNotification('success', `Código leído: ${normalizedBarcode}`);
-  }, []);
+    showNotification('success', `Codigo leido: ${normalizedBarcode}`);
+    setScannerStatus(`Codigo leido: ${normalizedBarcode}`);
+    if (showBarcodeScannerModal && isMobileDevice) {
+      stopBarcodeScanner();
+    }
+  }, [activeBarcodeFieldIndex, isMobileDevice, showBarcodeScannerModal]);
 
   useScannerKeyboardInput({
-    enabled: showBarcodeScannerModal && !isMobileDevice,
+    enabled: showModal && !isMobileDevice,
     onScan: (barcode) => {
       setKeyboardScannerDetected(true);
       applyScannedBarcode(barcode);
     },
     keepLastBufferedValue: true,
+    shouldIgnoreEvent: (event) => event.target?.dataset?.barcodeScannerTarget !== 'true',
     onBufferChange: (nextBuffer) => {
       setManualBarcode(nextBuffer);
       setScannerError('');
-      setScannerStatus(nextBuffer ? 'Leyendo scanner USB...' : 'Esperando lectura del scanner USB...');
+      setScannerStatus(nextBuffer ? 'Leyendo scanner USB...' : 'Scanner USB listo para leer...');
     }
   });
 
@@ -513,6 +527,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false,
         linkedProductIds: product.linkedProductIds || []
       });
+      setActiveBarcodeFieldIndex(0);
     } else {
       setEditingProduct(null);
       setFormData({
@@ -535,6 +550,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         ivuMunicipalEnabled: true,
         linkedProductIds: []
       });
+      setActiveBarcodeFieldIndex(0);
     }
     setShowModal(true);
   };
@@ -562,6 +578,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       ivuMunicipalEnabled: true,
       linkedProductIds: []
     });
+    setActiveBarcodeFieldIndex(0);
   };
 
   const closeProductModal = () => {
@@ -595,6 +612,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   };
 
   const updateBarcodeRow = (index, value) => {
+    setActiveBarcodeFieldIndex(index);
     setFormData((current) => {
       const nextBarcodes = (current.barcodes || []).map((barcode, barcodeIndex) =>
         barcodeIndex === index ? value : barcode
@@ -611,6 +629,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   };
 
   const addBarcodeRow = () => {
+    const nextIndex = (formData.barcodes || ['']).length;
+    setActiveBarcodeFieldIndex(nextIndex);
     setFormData((current) => ({
       ...current,
       barcodes: [...(current.barcodes || ['']), '']
@@ -1544,6 +1564,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                 label="Código de Barras"
                 value={formData.barcodes?.[0] || ''}
                 onChange={(e) => updateBarcodeRow(0, e.target.value)}
+                onFocus={() => setActiveBarcodeFieldIndex(0)}
+                data-barcode-scanner-target="true"
                 required
                 placeholder="Principal: Ej. 1234567890001"
               />
@@ -1572,6 +1594,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                       type="text"
                       value={barcode}
                       onChange={(e) => updateBarcodeRow(index + 1, e.target.value)}
+                      onFocus={() => setActiveBarcodeFieldIndex(index + 1)}
+                      data-barcode-scanner-target="true"
                       className="input flex-1"
                       placeholder="CÃ³digo adicional"
                     />

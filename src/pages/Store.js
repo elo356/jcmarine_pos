@@ -7,12 +7,19 @@ import Notification from '../components/Notification';
 import { useAuth } from '../contexts/AuthContext';
 import { subscribeEmployees } from '../services/employeesService';
 import { subscribeSales } from '../services/salesService';
+import { subscribeShifts } from '../services/shiftsService';
 import { verifyFirestoreAvailability } from '../services/firestoreHealthService';
 import { createStoreStatusLog, subscribeStoreStatusLogs } from '../services/storeStatusLogService';
+import { saveWeeklyShiftClosure, subscribeWeeklyShiftClosures } from '../services/weeklyShiftClosureService';
 import { PAYMENT_METHODS } from '../utils/paymentUtils';
 import { buildStoreClosurePrintHtml } from '../utils/printTemplates';
 import { getNetSaleTotal, getSaleRefundTotal, isReportableSale } from '../utils/salesUtils';
 import { printHtmlDocument } from '../services/printService';
+import {
+  buildWeeklyShiftClosureRecord,
+  calculateEmployeeWeeklyShiftStats,
+  getAutomaticWeeklyClosuresToCreate
+} from '../utils/weeklyShiftUtils';
 
 const CASH_COUNT_FIELDS = [
   { key: '100', label: '$100', value: 100 },
@@ -53,7 +60,9 @@ const StorePage = () => {
   const { user, profile } = useAuth();
   const [employees, setEmployees] = useState([]);
   const [sales, setSales] = useState([]);
+  const [shifts, setShifts] = useState([]);
   const [storeStatusLogs, setStoreStatusLogs] = useState([]);
+  const [weeklyShiftClosures, setWeeklyShiftClosures] = useState([]);
   const [showOpenModal, setShowOpenModal] = useState(false);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [showCashCountModal, setShowCashCountModal] = useState(false);
@@ -103,15 +112,25 @@ const StorePage = () => {
       (rows) => setSales(rows),
       (error) => console.error('Error subscribing sales in store page:', error)
     );
+    const unsubShifts = subscribeShifts(
+      (rows) => setShifts(rows),
+      (error) => console.error('Error subscribing shifts in store page:', error)
+    );
     const unsubStoreStatusLogs = subscribeStoreStatusLogs(
       (rows) => setStoreStatusLogs(rows),
       (error) => console.error('Error subscribing store status logs in store page:', error)
+    );
+    const unsubWeeklyShiftClosures = subscribeWeeklyShiftClosures(
+      (rows) => setWeeklyShiftClosures(rows),
+      (error) => console.error('Error subscribing weekly shift closures in store page:', error)
     );
 
     return () => {
       unsubEmployees();
       unsubSales();
+      unsubShifts();
       unsubStoreStatusLogs();
+      unsubWeeklyShiftClosures();
     };
   }, []);
 
@@ -133,6 +152,15 @@ const StorePage = () => {
   const currentEmployee = useMemo(
     () => resolveCurrentEmployee(employees),
     [employees, resolveCurrentEmployee]
+  );
+  const currentActor = useMemo(
+    () => ({
+      id: currentEmployee?.id || user?.uid || profile?.id || 'unknown',
+      name: currentEmployee?.name || profile?.name || user?.email || 'Usuario',
+      role: currentEmployee?.role || profile?.role || 'cashier',
+      email: currentEmployee?.email || user?.email || profile?.email || ''
+    }),
+    [currentEmployee, profile?.email, profile?.id, profile?.name, profile?.role, user?.email, user?.uid]
   );
 
   const latestStoreLog = useMemo(
@@ -225,10 +253,79 @@ const StorePage = () => {
     return [...storeStatusLogs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }, [storeStatusLogs]);
 
+  const employeeWeeklyRows = useMemo(() => {
+    return employees
+      .filter((employee) => employee.status !== 'inactive')
+      .map((employee) => ({
+        employee,
+        stats: calculateEmployeeWeeklyShiftStats({
+          employee,
+          shifts,
+          closures: weeklyShiftClosures,
+          sales,
+          referenceDate: new Date()
+        })
+      }))
+      .sort((a, b) => b.stats.totalEarned - a.stats.totalEarned);
+  }, [employees, sales, shifts, weeklyShiftClosures]);
+
+  const weeklyHistoryRows = useMemo(
+    () => [...weeklyShiftClosures].sort((a, b) => new Date(b.closedAt || 0) - new Date(a.closedAt || 0)),
+    [weeklyShiftClosures]
+  );
+
   const cashCountTotal = useMemo(
     () => getCashCountTotal(closeForm.cashCountBreakdown),
     [closeForm.cashCountBreakdown]
   );
+
+  useEffect(() => {
+    if (profile?.role !== 'admin' || !firestoreReady || employees.length === 0) return;
+
+    const automaticClosures = getAutomaticWeeklyClosuresToCreate({
+      employees,
+      shifts,
+      closures: weeklyShiftClosures,
+      sales,
+      closedBy: currentActor,
+      referenceDate: new Date()
+    });
+
+    if (automaticClosures.length === 0) return;
+
+    Promise.all(automaticClosures.map((closure) => saveWeeklyShiftClosure(closure)))
+      .then(() => {
+        setNotification({
+          type: 'success',
+          message: `Se cerraron automaticamente ${automaticClosures.length} shift(s) semanales de esta semana.`
+        });
+      })
+      .catch((error) => {
+        console.error('Error creating automatic weekly closures:', error);
+      });
+  }, [currentActor, employees, firestoreReady, profile?.role, sales, shifts, weeklyShiftClosures]);
+
+  const handleManualWeeklyClose = async (employee, stats) => {
+    const firestoreAvailable = await ensureFirestoreReady();
+    if (!firestoreAvailable) return;
+
+    const closure = buildWeeklyShiftClosureRecord({
+      employee,
+      stats,
+      closedBy: currentActor,
+      mode: 'manual',
+      closedAt: new Date(),
+      id: generateId('weekly_shift_close')
+    });
+
+    try {
+      await saveWeeklyShiftClosure(closure);
+      setNotification({ type: 'success', message: `Shift semanal cerrado para ${employee.name}.` });
+    } catch (error) {
+      console.error(error);
+      setNotification({ type: 'error', message: 'No se pudo cerrar el shift semanal del empleado.' });
+    }
+  };
 
   const handleOpenStore = async () => {
     if (isStoreOpen) {
@@ -537,6 +634,62 @@ const StorePage = () => {
 
       <div className="card overflow-hidden">
         <div className="px-6 pt-6">
+          <h2 className="text-lg font-semibold text-gray-900">Shift semanal por empleado</h2>
+          <p className="text-sm text-gray-500">
+            Esto muestra lo acumulado desde el ultimo cierre semanal del empleado. El sabado se cierra automaticamente y tambien puedes cerrarlo manualmente.
+          </p>
+        </div>
+        <div className="table-container">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Empleado</th>
+                <th>Desde</th>
+                <th>Horas</th>
+                <th>Tarifa</th>
+                <th>Ganado</th>
+                <th>Ventas</th>
+                <th>Ultimo cierre</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {employeeWeeklyRows.length === 0 ? (
+                <tr>
+                  <td colSpan="8" className="text-center py-8 text-gray-500">No hay empleados para calcular.</td>
+                </tr>
+              ) : (
+                employeeWeeklyRows.map(({ employee, stats }) => (
+                  <tr key={`weekly_row_${employee.id}`}>
+                    <td>{employee.name}</td>
+                    <td>{formatDateTime(stats.periodStart)}</td>
+                    <td>{stats.totalHours.toFixed(2)}h</td>
+                    <td>{formatCurrency(stats.hourlyRate)}</td>
+                    <td className="font-semibold text-emerald-700">{formatCurrency(stats.totalEarned)}</td>
+                    <td>{formatCurrency(stats.totalSales)}</td>
+                    <td>{stats.lastClosure ? formatDateTime(stats.lastClosure.closedAt || stats.lastClosure.createdAt) : '-'}</td>
+                    <td>
+                      {profile?.role === 'admin' ? (
+                        <button
+                          type="button"
+                          onClick={() => handleManualWeeklyClose(employee, stats)}
+                          className="btn-secondary inline-flex items-center gap-2"
+                        >
+                          <CalendarClock size={14} />
+                          Cerrar semanal
+                        </button>
+                      ) : '-'}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="px-6 pt-6">
           <h2 className="text-lg font-semibold text-gray-900">Historial de apertura y cierre</h2>
           <p className="text-sm text-gray-500">
             Aquí queda el historial de tienda con aperturas, cierres y cuadre registrado.
@@ -590,6 +743,55 @@ const StorePage = () => {
                           Imprimir
                         </button>
                       ) : '-'}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="px-6 pt-6">
+          <h2 className="text-lg font-semibold text-gray-900">Historial de shift semanales</h2>
+          <p className="text-sm text-gray-500">
+            Cada cierre semanal baja el acumulado del empleado a cero y queda guardado aqui.
+          </p>
+        </div>
+        <div className="table-container">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Empleado</th>
+                <th>Periodo</th>
+                <th>Horas</th>
+                <th>Tarifa</th>
+                <th>Ganado</th>
+                <th>Ventas</th>
+                <th>Cerrado</th>
+                <th>Modo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {weeklyHistoryRows.length === 0 ? (
+                <tr>
+                  <td colSpan="8" className="text-center py-8 text-gray-500">No hay cierres semanales todavia.</td>
+                </tr>
+              ) : (
+                weeklyHistoryRows.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.employeeName}</td>
+                    <td>{formatDateTime(row.periodStart)} - {formatDateTime(row.periodEnd)}</td>
+                    <td>{Number(row.totalHours || 0).toFixed(2)}h</td>
+                    <td>{formatCurrency(row.hourlyRate || 0)}</td>
+                    <td className="font-semibold text-emerald-700">{formatCurrency(row.totalEarned || 0)}</td>
+                    <td>{formatCurrency(row.totalSales || 0)}</td>
+                    <td>{formatDateTime(row.closedAt || row.createdAt)}</td>
+                    <td>
+                      <span className={row.mode === 'auto' ? 'badge badge-green' : 'badge badge-blue'}>
+                        {row.mode === 'auto' ? 'Auto sabado' : 'Manual'}
+                      </span>
                     </td>
                   </tr>
                 ))

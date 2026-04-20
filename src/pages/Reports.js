@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { BarChart3, TrendingUp, DollarSign, ShoppingBag, Calendar, Download } from 'lucide-react';
+import { BarChart3, TrendingUp, DollarSign, ShoppingBag, Calendar, Download, Printer } from 'lucide-react';
 import { loadData, formatCurrency } from '../data/demoData';
 import Notification from '../components/Notification';
 import { subscribeSales } from '../services/salesService';
@@ -8,6 +8,7 @@ import { normalizePaymentMethod } from '../utils/paymentUtils';
 import { getNetSaleTotal, isReportableSale } from '../utils/salesUtils';
 import { subscribeSpecialOrderPayments, subscribeSpecialOrders } from '../services/specialOrdersService';
 import { normalizeSpecialOrder, SPECIAL_ORDER_STATUS } from '../utils/specialOrderUtils';
+import { printHtmlDocument } from '../services/printService';
 
 const Reports = () => {
   const [sales, setSales] = useState([]);
@@ -276,6 +277,120 @@ const Reports = () => {
     setNotification({ type: 'success', message: 'Reporte exportado correctamente' });
   };
 
+  const buildReportPrintHtml = () => {
+    const topProductsRows = topProducts.map((product, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${product.name}</td>
+        <td style="text-align:right;">${product.quantity}</td>
+        <td style="text-align:right;">${formatCurrency(product.revenue)}</td>
+      </tr>
+    `).join('');
+
+    const categoryRows = categorySales.map((category) => `
+      <tr>
+        <td>${category.category}</td>
+        <td style="text-align:right;">${category.items}</td>
+        <td style="text-align:right;">${formatCurrency(category.revenue)}</td>
+      </tr>
+    `).join('');
+
+    return `
+      <!doctype html>
+      <html lang="es">
+        <head>
+          <meta charset="utf-8" />
+          <title>Reporte ${startDate} a ${endDate}</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #111827; margin: 0; padding: 24px; }
+            .sheet { max-width: 900px; margin: 0 auto; }
+            .header { margin-bottom: 16px; }
+            .muted { color: #6b7280; font-size: 12px; }
+            .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+            .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }
+            .metric { display: flex; justify-content: space-between; margin-bottom: 6px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+            th, td { text-align: left; border-bottom: 1px solid #e5e7eb; padding: 8px 0; }
+            th:last-child, td:last-child { text-align: right; }
+            @media print { body { padding: 0; } .sheet { max-width: 100%; } }
+          </style>
+        </head>
+        <body>
+          <div class="sheet">
+            <div class="header">
+              <h1>Reporte de ventas</h1>
+              <p class="muted">Rango: ${startDate} a ${endDate}</p>
+              <p class="muted">Generado: ${new Date().toLocaleString('es-PR')}</p>
+            </div>
+
+            <div class="grid">
+              <div class="card">
+                <h3>Resumen</h3>
+                <div class="metric"><span>Ingresos</span><strong>${formatCurrency(metrics.totalRevenue)}</strong></div>
+                <div class="metric"><span>Ganancia</span><strong>${formatCurrency(metrics.totalProfit + specialOrderMetrics.deliveredProfit)}</strong></div>
+                <div class="metric"><span>Transacciones</span><strong>${metrics.totalTransactions}</strong></div>
+                <div class="metric"><span>Ticket promedio</span><strong>${formatCurrency(metrics.avgTransaction)}</strong></div>
+              </div>
+              <div class="card">
+                <h3>Metodos de pago</h3>
+                <div class="metric"><span>Efectivo</span><strong>${formatCurrency(paymentMethods.cash)}</strong></div>
+                <div class="metric"><span>Tarjeta</span><strong>${formatCurrency(paymentMethods.card)}</strong></div>
+                <div class="metric"><span>ATH Movil</span><strong>${formatCurrency(paymentMethods.ath_movil)}</strong></div>
+                <div class="metric"><span>Split</span><strong>${formatCurrency(paymentMethods.split)}</strong></div>
+              </div>
+            </div>
+
+            <div class="card" style="margin-bottom: 12px;">
+              <h3>Top productos</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Producto</th>
+                    <th style="text-align:right;">Cantidad</th>
+                    <th style="text-align:right;">Ventas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${topProductsRows || '<tr><td colspan="4" class="muted">Sin datos</td></tr>'}
+                </tbody>
+              </table>
+            </div>
+
+            <div class="card">
+              <h3>Ventas por categoria</h3>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Categoria</th>
+                    <th style="text-align:right;">Articulos</th>
+                    <th style="text-align:right;">Ventas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${categoryRows || '<tr><td colspan="3" class="muted">Sin datos</td></tr>'}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
+  const handlePrintReport = async () => {
+    try {
+      await printHtmlDocument({
+        title: `Reporte ${startDate} a ${endDate}`,
+        html: buildReportPrintHtml()
+      });
+      setNotification({ type: 'success', message: 'Reporte enviado al dialogo de impresion' });
+    } catch (error) {
+      console.error('Error printing report:', error);
+      setNotification({ type: 'error', message: 'No se pudo imprimir el reporte' });
+    }
+  };
+
   const metrics = calculateMetrics();
   const topProducts = getTopProducts();
   const categorySales = getSalesByCategory();
@@ -319,10 +434,16 @@ const Reports = () => {
           <BarChart3 className="text-primary-600" size={28} />
           <h1 className="page-title">Reportes y analitica</h1>
         </div>
-        <button onClick={exportReport} className="btn-secondary">
-          <Download size={16} className="mr-2" />
-          Exportar reporte
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={handlePrintReport} className="btn-secondary">
+            <Printer size={16} className="mr-2" />
+            Imprimir reporte
+          </button>
+          <button onClick={exportReport} className="btn-secondary">
+            <Download size={16} className="mr-2" />
+            Exportar reporte
+          </button>
+        </div>
       </div>
 
       {/* Date Range Filter */}

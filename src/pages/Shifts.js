@@ -25,7 +25,15 @@ const calculateShiftTotals = (shift, sales, options = {}) => {
   const totalHours = (endTime - startTime) / (1000 * 60 * 60) - (breakMinutes / 60);
   const shiftSales = sales.filter((sale) => {
     const saleDate = new Date(sale.date);
-    return saleDate >= startTime && saleDate <= endTime && isReportableSale(sale);
+    if (Number.isNaN(saleDate.getTime()) || saleDate < startTime || saleDate > endTime || !isReportableSale(sale)) {
+      return false;
+    }
+
+    if (sale.shiftId) {
+      return sale.shiftId === shift.id;
+    }
+
+    return sale.cashierId === shift.employeeId;
   });
   const totalSales = shiftSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0);
 
@@ -47,6 +55,7 @@ const Shifts = () => {
   const [clockInNote, setClockInNote] = useState('');
   const [showBreakModal, setShowBreakModal] = useState(false);
   const [breakNote, setBreakNote] = useState('');
+  const [breakTargetShift, setBreakTargetShift] = useState(null);
   const [notification, setNotification] = useState(null);
   const [filterEmployee, setFilterEmployee] = useState('all');
   const [now, setNow] = useState(Date.now());
@@ -113,20 +122,31 @@ const Shifts = () => {
     [employees, resolveCurrentEmployee]
   );
 
-  useEffect(() => {
+  const sortedShifts = useMemo(
+    () => [...shifts].sort((a, b) => new Date(b.startTime) - new Date(a.startTime)),
+    [shifts]
+  );
+
+  const activeShifts = useMemo(() => {
+    const openShifts = sortedShifts.filter((shift) => !shift.endTime);
     if (isCashier && currentEmployee) {
-      setFilterEmployee(currentEmployee.id);
-    } else if (!isCashier) {
-      setFilterEmployee('all');
+      return openShifts.filter((shift) => shift.employeeId === currentEmployee.id);
+    }
+    return openShifts;
+  }, [currentEmployee, isCashier, sortedShifts]);
+
+  useEffect(() => {
+    if (isCashier) {
+      if (currentEmployee) {
+        setFilterEmployee(currentEmployee.id);
+      }
+      setActiveShift(activeShifts[0] || null);
+      return;
     }
 
-    const sortedShifts = [...shifts].sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
-    const active = isCashier && currentEmployee
-      ? sortedShifts.find((shift) => !shift.endTime && shift.employeeId === currentEmployee.id)
-      : sortedShifts.find((shift) => !shift.endTime);
-
-    setActiveShift(active || null);
-  }, [currentEmployee, isCashier, shifts]);
+    setFilterEmployee('all');
+    setActiveShift(null);
+  }, [activeShifts, currentEmployee, isCashier]);
 
   const closeClockInModal = () => {
     setShowClockInModal(false);
@@ -134,15 +154,28 @@ const Shifts = () => {
     setClockInNote('');
   };
 
+  const openBreakModalForShift = (shift) => {
+    setBreakTargetShift(shift || null);
+    setBreakNote('');
+    setShowBreakModal(true);
+  };
+
   const closeBreakModal = () => {
     setShowBreakModal(false);
+    setBreakTargetShift(null);
     setBreakNote('');
   };
 
   const handleClockIn = async () => {
     const employeeIdToUse = isCashier ? currentEmployee?.id : selectedEmployee;
     if (!employeeIdToUse) {
-      setNotification({ type: 'error', message: 'Please select an employee' });
+      setNotification({ type: 'error', message: 'Selecciona un empleado.' });
+      return;
+    }
+
+    const existingOpenShift = shifts.find((shift) => !shift.endTime && shift.employeeId === employeeIdToUse);
+    if (existingOpenShift) {
+      setNotification({ type: 'warning', message: 'Ese empleado ya tiene un turno abierto.' });
       return;
     }
 
@@ -153,6 +186,7 @@ const Shifts = () => {
       id: generateId(),
       employeeId: employee.id,
       employeeName: employee.name,
+      employeeEmail: employee.email || '',
       employeeRole: employee.role,
       startTime: new Date().toISOString(),
       endTime: null,
@@ -174,30 +208,30 @@ const Shifts = () => {
     }
   };
 
-  const handleClockOut = async () => {
-    if (!activeShift) return;
+  const handleClockOut = async (targetShift = activeShift) => {
+    if (!targetShift) return;
 
     const endTime = new Date();
-    const { totalHours, totalSales } = calculateShiftTotals(activeShift, sales, {
+    const { totalHours, totalSales } = calculateShiftTotals(targetShift, sales, {
       endTime: endTime.toISOString()
     });
 
     try {
-      await patchShift(activeShift.id, {
+      await patchShift(targetShift.id, {
         endTime: endTime.toISOString(),
         status: 'completed',
         totalHours: Math.max(0, totalHours),
         totalSales
       });
-      setNotification({ type: 'success', message: `${activeShift.employeeName} clocked out successfully` });
+      setNotification({ type: 'success', message: `${targetShift.employeeName} clocked out successfully` });
     } catch (error) {
       console.error(error);
       setNotification({ type: 'error', message: 'No se pudo registrar el clock out en Firestore.' });
     }
   };
 
-  const handleStartBreak = async () => {
-    if (!activeShift) return;
+  const handleStartBreak = async (targetShift = breakTargetShift || activeShift) => {
+    if (!targetShift) return;
 
     const newBreak = {
       id: generateId(),
@@ -208,11 +242,11 @@ const Shifts = () => {
     };
 
     try {
-      await patchShift(activeShift.id, {
-        breaks: [...(activeShift.breaks || []), newBreak],
+      await patchShift(targetShift.id, {
+        breaks: [...(targetShift.breaks || []), newBreak],
         status: 'on_break'
       });
-      setNotification({ type: 'success', message: 'Break started' });
+      setNotification({ type: 'success', message: `Break started for ${targetShift.employeeName}` });
       closeBreakModal();
     } catch (error) {
       console.error(error);
@@ -220,10 +254,10 @@ const Shifts = () => {
     }
   };
 
-  const handleEndBreak = async () => {
-    if (!activeShift || activeShift.status !== 'on_break') return;
+  const handleEndBreak = async (targetShift = activeShift) => {
+    if (!targetShift || targetShift.status !== 'on_break') return;
 
-    const breaks = [...(activeShift.breaks || [])];
+    const breaks = [...(targetShift.breaks || [])];
     const lastBreakIndex = breaks.length - 1;
     if (lastBreakIndex === -1) return;
 
@@ -241,12 +275,12 @@ const Shifts = () => {
     };
 
     try {
-      await patchShift(activeShift.id, {
+      await patchShift(targetShift.id, {
         breaks,
-        totalBreakTime: Number(activeShift.totalBreakTime || 0) + duration,
+        totalBreakTime: Number(targetShift.totalBreakTime || 0) + duration,
         status: 'active'
       });
-      setNotification({ type: 'success', message: `Break ended (${duration} mins)` });
+      setNotification({ type: 'success', message: `Break ended for ${targetShift.employeeName} (${duration} mins)` });
     } catch (error) {
       console.error(error);
       setNotification({ type: 'error', message: 'No se pudo finalizar break en Firestore.' });
@@ -255,11 +289,11 @@ const Shifts = () => {
 
   const filteredShifts = useMemo(() => {
     if (isCashier && currentEmployee?.id) {
-      return shifts.filter((shift) => shift.employeeId === currentEmployee.id);
+      return sortedShifts.filter((shift) => shift.employeeId === currentEmployee.id);
     }
-    if (filterEmployee === 'all') return shifts;
-    return shifts.filter((shift) => shift.employeeId === filterEmployee);
-  }, [currentEmployee?.id, filterEmployee, isCashier, shifts]);
+    if (filterEmployee === 'all') return sortedShifts;
+    return sortedShifts.filter((shift) => shift.employeeId === filterEmployee);
+  }, [currentEmployee?.id, filterEmployee, isCashier, sortedShifts]);
 
   const todayShifts = useMemo(() => {
     const today = new Date().toDateString();
@@ -294,26 +328,25 @@ const Shifts = () => {
           <h1 className="page-title">Shift Management</h1>
         </div>
         <div className="flex gap-2">
-          {activeShift ? (
-            <>
-              {activeShift.status === 'active' && (
-                <button onClick={() => setShowBreakModal(true)} className="btn-secondary">
-                  <Coffee size={16} className="mr-2" />
-                  Start Break
-                </button>
-              )}
-              {activeShift.status === 'on_break' && (
-                <button onClick={handleEndBreak} className="btn-secondary">
-                  <Clock size={16} className="mr-2" />
-                  End Break
-                </button>
-              )}
-              <button onClick={handleClockOut} className="btn-primary">
-                <LogOut size={16} className="mr-2" />
-                Clock Out
-              </button>
-            </>
-          ) : (
+          {isCashier && activeShift?.status === 'active' && (
+            <button onClick={() => openBreakModalForShift(activeShift)} className="btn-secondary">
+              <Coffee size={16} className="mr-2" />
+              Start Break
+            </button>
+          )}
+          {isCashier && activeShift?.status === 'on_break' && (
+            <button onClick={() => handleEndBreak(activeShift)} className="btn-secondary">
+              <Clock size={16} className="mr-2" />
+              End Break
+            </button>
+          )}
+          {isCashier && activeShift && (
+            <button onClick={() => handleClockOut(activeShift)} className="btn-primary">
+              <LogOut size={16} className="mr-2" />
+              Clock Out
+            </button>
+          )}
+          {(!isCashier || !activeShift) && (
             <button onClick={() => setShowClockInModal(true)} className="btn-primary">
               <LogIn size={16} className="mr-2" />
               Clock In
@@ -322,7 +355,7 @@ const Shifts = () => {
         </div>
       </div>
 
-      {activeShift && (
+      {isCashier && activeShift && (
         <div className="card p-6 bg-gradient-to-r from-blue-500 to-blue-600 text-white">
           <div className="flex items-center justify-between">
             <div>
@@ -345,6 +378,28 @@ const Shifts = () => {
               <div className="text-sm opacity-80">Status</div>
               <div className="text-xl font-bold capitalize">{activeShift.status.replace('_', ' ')}</div>
               <div className="text-sm opacity-80 mt-2">Started: {formatDateTime(activeShift.startTime)}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!isCashier && (
+        <div className="card p-6 bg-gradient-to-r from-slate-800 to-slate-700 text-white">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="text-sm opacity-80">Turnos abiertos</div>
+              <div className="text-3xl font-bold">{activeShifts.length}</div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {activeShifts.length === 0 ? (
+                <span className="text-sm opacity-80">No hay turnos activos.</span>
+              ) : (
+                activeShifts.slice(0, 4).map((shift) => (
+                  <span key={shift.id} className="rounded-full bg-white/15 px-3 py-1 text-sm">
+                    {shift.employeeName}
+                  </span>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -413,12 +468,13 @@ const Shifts = () => {
                 <th>Net Hours</th>
                 <th>Sales</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredShifts.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="text-center py-8 text-gray-500">No shifts recorded</td>
+                  <td colSpan={10} className="text-center py-8 text-gray-500">No shifts recorded</td>
                 </tr>
               ) : (
                 filteredShifts.map((shift) => {
@@ -450,6 +506,39 @@ const Shifts = () => {
                       <td className="font-medium">{shift.endTime ? `${Number(shift.totalHours || 0).toFixed(2)}h` : getRunningNetHours(shift)}</td>
                       <td>{salesAmount > 0 ? formatCurrency(salesAmount) : '-'}</td>
                       <td>{getStatusBadge(shift)}</td>
+                      <td>
+                        {!shift.endTime ? (
+                          <div className="flex flex-wrap gap-2">
+                            {shift.status === 'active' && (
+                              <button
+                                type="button"
+                                onClick={() => openBreakModalForShift(shift)}
+                                className="text-xs text-amber-700 hover:underline"
+                              >
+                                Break
+                              </button>
+                            )}
+                            {shift.status === 'on_break' && (
+                              <button
+                                type="button"
+                                onClick={() => handleEndBreak(shift)}
+                                className="text-xs text-blue-700 hover:underline"
+                              >
+                                Reanudar
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleClockOut(shift)}
+                              className="text-xs text-red-700 hover:underline"
+                            >
+                              Clock out
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">Sin acciones</span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })
@@ -500,6 +589,12 @@ const Shifts = () => {
       {showBreakModal && (
         <Modal isOpen={showBreakModal} onClose={closeBreakModal} title="Start Break" size="sm">
           <div className="space-y-4">
+            {breakTargetShift && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                Break para <strong>{breakTargetShift.employeeName}</strong>
+              </div>
+            )}
+
             <Input
               label="Notes (optional)"
               value={breakNote}
@@ -509,7 +604,7 @@ const Shifts = () => {
 
             <div className="flex justify-end gap-2 pt-4">
               <button onClick={closeBreakModal} className="btn-secondary">Cancel</button>
-              <button onClick={handleStartBreak} className="btn-primary">
+              <button onClick={() => handleStartBreak()} className="btn-primary">
                 <Coffee size={16} className="mr-2" />
                 Start Break
               </button>

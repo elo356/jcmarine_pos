@@ -12,9 +12,18 @@ import {
   toggleEmployeeStatus,
   updateEmployee
 } from '../services/employeesService';
-import { formatDate } from '../data/demoData';
+import { formatCurrency, formatDate } from '../data/demoData';
+import { subscribeSales } from '../services/salesService';
+import { subscribeShifts } from '../services/shiftsService';
+import { saveWeeklyShiftClosure, subscribeWeeklyShiftClosures } from '../services/weeklyShiftClosureService';
 import { useAuth } from '../contexts/AuthContext';
 import { useRoleDefinitions } from '../hooks/useRoleDefinitions';
+import {
+  buildWeeklyShiftClosureRecord,
+  calculateEmployeeWeeklyShiftStats,
+  getAutomaticWeeklyClosuresToCreate,
+  getEmployeeShiftLifetimeTotals
+} from '../utils/weeklyShiftUtils';
 
 const DEFAULT_FORM = {
   name: '',
@@ -29,10 +38,13 @@ const DEFAULT_FORM = {
 };
 
 const Employees = () => {
-  const { profile, isAdmin } = useAuth();
+  const { user, profile, isAdmin } = useAuth();
   const { roles, hasPermission } = useRoleDefinitions();
   const canManageEmployees = isAdmin || hasPermission(profile?.role, 'manage_employees');
   const [employees, setEmployees] = useState([]);
+  const [sales, setSales] = useState([]);
+  const [shifts, setShifts] = useState([]);
+  const [weeklyShiftClosures, setWeeklyShiftClosures] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -43,7 +55,10 @@ const Employees = () => {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    let unsub = null;
+    let unsubEmployees = null;
+    let unsubSales = null;
+    let unsubShifts = null;
+    let unsubWeekly = null;
 
     const start = async () => {
       try {
@@ -53,21 +68,46 @@ const Employees = () => {
         console.error(error);
       }
 
-      unsub = subscribeEmployees(
+      unsubEmployees = subscribeEmployees(
         (rows) => setEmployees(rows),
         (error) => {
           console.error(error);
           setNotification({ type: 'error', message: 'No se pudieron cargar empleados de Firebase.' });
         }
       );
+
+      unsubSales = subscribeSales(
+        (rows) => setSales(rows || []),
+        (error) => console.error('No se pudieron cargar ventas en empleados:', error)
+      );
+      unsubShifts = subscribeShifts(
+        (rows) => setShifts(rows || []),
+        (error) => console.error('No se pudieron cargar turnos en empleados:', error)
+      );
+      unsubWeekly = subscribeWeeklyShiftClosures(
+        (rows) => setWeeklyShiftClosures(rows || []),
+        (error) => console.error('No se pudieron cargar cierres semanales:', error)
+      );
     };
 
     start();
 
     return () => {
-      if (unsub) unsub();
+      if (unsubEmployees) unsubEmployees();
+      if (unsubSales) unsubSales();
+      if (unsubShifts) unsubShifts();
+      if (unsubWeekly) unsubWeekly();
     };
   }, []);
+
+  const currentActor = useMemo(
+    () => ({
+      id: user?.uid || profile?.uid || 'unknown',
+      name: profile?.name || user?.email || 'Usuario',
+      role: profile?.role || 'cashier'
+    }),
+    [profile?.name, profile?.role, profile?.uid, user?.email, user?.uid]
+  );
 
   const filteredEmployees = useMemo(() => {
     return employees.filter((emp) => {
@@ -84,6 +124,42 @@ const Employees = () => {
       return matchesSearch && matchesRole && matchesStatus;
     });
   }, [employees, searchTerm, filterRole, filterStatus]);
+
+  const weeklyStatsByEmployee = useMemo(
+    () => new Map(
+      employees.map((employee) => [
+        employee.id,
+        calculateEmployeeWeeklyShiftStats({
+          employee,
+          shifts,
+          closures: weeklyShiftClosures,
+          sales,
+          referenceDate: new Date()
+        })
+      ])
+    ),
+    [employees, sales, shifts, weeklyShiftClosures]
+  );
+
+  useEffect(() => {
+    if (!isAdmin || employees.length === 0) return;
+
+    const automaticClosures = getAutomaticWeeklyClosuresToCreate({
+      employees,
+      shifts,
+      closures: weeklyShiftClosures,
+      sales,
+      closedBy: currentActor,
+      referenceDate: new Date()
+    });
+
+    if (automaticClosures.length === 0) return;
+
+    Promise.all(automaticClosures.map((closure) => saveWeeklyShiftClosure(closure)))
+      .catch((error) => {
+        console.error('Error auto-closing weekly shifts from employees page:', error);
+      });
+  }, [currentActor, employees, isAdmin, sales, shifts, weeklyShiftClosures]);
 
   const openAddModal = () => {
     setEditingEmployee(null);
@@ -174,6 +250,24 @@ const Employees = () => {
     } catch (error) {
       console.error(error);
       setNotification({ type: 'error', message: 'No se pudo cambiar el estado.' });
+    }
+  };
+
+  const handleManualWeeklyClose = async (employee) => {
+    const stats = weeklyStatsByEmployee.get(employee.id);
+    const closure = buildWeeklyShiftClosureRecord({
+      employee,
+      stats,
+      closedBy: currentActor,
+      mode: 'manual'
+    });
+
+    try {
+      await saveWeeklyShiftClosure(closure);
+      setNotification({ type: 'success', message: `Shift semanal cerrado para ${employee.name}.` });
+    } catch (error) {
+      console.error(error);
+      setNotification({ type: 'error', message: 'No se pudo cerrar el shift semanal.' });
     }
   };
 
@@ -294,75 +388,101 @@ const Employees = () => {
         {filteredEmployees.length === 0 ? (
           <div className="col-span-full card text-center py-8 text-gray-500">No employees found</div>
         ) : (
-          filteredEmployees.map((employee) => (
-            <div key={employee.id} className="card p-4">
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center">
-                    <span className="text-primary-600 font-bold text-lg">{(employee.name || '?').charAt(0)}</span>
+          filteredEmployees.map((employee) => {
+            const weeklyStats = weeklyStatsByEmployee.get(employee.id);
+            const lifetimeTotals = getEmployeeShiftLifetimeTotals(employee, shifts);
+
+            return (
+              <div key={employee.id} className="card p-4">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center">
+                      <span className="text-primary-600 font-bold text-lg">{(employee.name || '?').charAt(0)}</span>
+                    </div>
+                    <div>
+                      <h3 className="font-medium text-gray-900">{employee.name}</h3>
+                      <div className="flex gap-2 mt-1">
+                        {getRoleBadge(employee.role)}
+                        {getStatusBadge(employee.status)}
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-medium text-gray-900">{employee.name}</h3>
-                    <div className="flex gap-2 mt-1">
-                      {getRoleBadge(employee.role)}
-                      {getStatusBadge(employee.status)}
+
+                  {canManageEmployees && (
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => openEditModal(employee)}
+                        className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 rounded"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(employee.id)}
+                        className="p-2 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center gap-2 text-gray-600">
+                    <Mail size={14} />
+                    <span>{employee.email}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-gray-600">
+                    <Phone size={14} />
+                    <span>{employee.phone || '-'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-gray-600">
+                    <Calendar size={14} />
+                    <span>Started: {employee.startDate ? formatDate(employee.startDate) : '-'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-gray-600">
+                    <DollarSign size={14} />
+                    <span>{formatCurrency(Number(employee.hourlyRate || 0))}/hour</span>
+                  </div>
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 mt-3">
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-emerald-800">Ganado semanal</span>
+                      <strong className="text-emerald-900">{formatCurrency(Number(weeklyStats?.totalEarned || 0))}</strong>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-xs text-emerald-700 mt-1">
+                      <span>Horas semanales</span>
+                      <span>{weeklyStats ? Number(weeklyStats.totalHours || 0).toFixed(2) : '0.00'}h</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-xs text-emerald-700 mt-1">
+                      <span>Total historico por shifts</span>
+                      <span>{formatCurrency(Number(lifetimeTotals.totalEarned || 0))}</span>
                     </div>
                   </div>
                 </div>
 
                 {canManageEmployees && (
-                  <div className="flex gap-1">
+                  <div className="mt-4 pt-4 border-t">
                     <button
-                      onClick={() => openEditModal(employee)}
-                      className="p-2 text-gray-500 hover:text-primary-600 hover:bg-gray-100 rounded"
+                      onClick={() => handleManualWeeklyClose(employee)}
+                      disabled={!weeklyStats || (Number(weeklyStats.totalHours || 0) <= 0 && Number(weeklyStats.totalEarned || 0) <= 0)}
+                      className="w-full py-2 rounded text-sm mb-2 bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Edit2 size={16} />
+                      Cerrar shift semanal
                     </button>
                     <button
-                      onClick={() => handleDelete(employee.id)}
-                      className="p-2 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded"
+                      onClick={() => handleToggleStatus(employee)}
+                      className={`w-full py-2 rounded text-sm ${
+                        employee.status === 'active'
+                          ? 'bg-red-50 text-red-600 hover:bg-red-100'
+                          : 'bg-green-50 text-green-600 hover:bg-green-100'
+                      }`}
                     >
-                      <Trash2 size={16} />
+                      {employee.status === 'active' ? 'Deactivate' : 'Activate'}
                     </button>
                   </div>
                 )}
               </div>
-
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center gap-2 text-gray-600">
-                  <Mail size={14} />
-                  <span>{employee.email}</span>
-                </div>
-                <div className="flex items-center gap-2 text-gray-600">
-                  <Phone size={14} />
-                  <span>{employee.phone || '-'}</span>
-                </div>
-                <div className="flex items-center gap-2 text-gray-600">
-                  <Calendar size={14} />
-                  <span>Started: {employee.startDate ? formatDate(employee.startDate) : '-'}</span>
-                </div>
-                <div className="flex items-center gap-2 text-gray-600">
-                  <DollarSign size={14} />
-                  <span>${Number(employee.hourlyRate || 0)}/hour</span>
-                </div>
-              </div>
-
-              {canManageEmployees && (
-                <div className="mt-4 pt-4 border-t">
-                  <button
-                    onClick={() => handleToggleStatus(employee)}
-                    className={`w-full py-2 rounded text-sm ${
-                      employee.status === 'active'
-                        ? 'bg-red-50 text-red-600 hover:bg-red-100'
-                        : 'bg-green-50 text-green-600 hover:bg-green-100'
-                    }`}
-                  >
-                    {employee.status === 'active' ? 'Deactivate' : 'Activate'}
-                  </button>
-                </div>
-              )}
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 

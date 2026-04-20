@@ -384,6 +384,9 @@ function Sales() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between"><span>Fecha</span><strong>{formatDateTime(selectedSale.date)}</strong></div>
                   <div className="flex justify-between"><span>Cajero</span><strong>{selectedSale.cashier || '-'}</strong></div>
+                  {selectedSale.chargedBy && selectedSale.chargedBy !== selectedSale.cashier && (
+                    <div className="flex justify-between"><span>Cobrado por</span><strong>{selectedSale.chargedBy}</strong></div>
+                  )}
                   <div className="flex justify-between"><span>Método</span><strong>{getPaymentMethodLabel(selectedSale.paymentMethod)}</strong></div>
                   <div className="flex justify-between"><span>Estado</span><strong>{getSaleStatusLabel(normalizeSaleStatus(selectedSale.status, selectedSale))}</strong></div>
                 </div>

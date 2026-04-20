@@ -93,6 +93,9 @@ const dottedDivider = `
 `;
 
 export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName = '' }) => {
+  const chargedByLabel = sale.chargedBy && sale.chargedBy !== sale.cashier
+    ? `<p class="muted">Cobrado por: ${sale.chargedBy}</p>`
+    : '';
   const title = documentType === 'invoice' ? `Factura ${sale.id}` : `Recibo ${sale.id}`;
   const body = `
     ${buildStoreHeader({
@@ -108,14 +111,18 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
         <thead>
           <tr>
             <th>Producto</th>
-            <th>Precio</th>
+            <th>Cant.</th>
+            <th>Precio unit.</th>
+            <th>Subtotal</th>
           </tr>
         </thead>
         <tbody>
           ${sale.items.map((item) => `
             <tr>
-              <td>${item.name}${item.quantity > 1 ? ` x${formatQuantity(item.quantity, item.unitType)}` : ''}${item.discountAmount > 0 ? ` <span class="muted">(Desc. ${formatCurrency(item.discountAmount)})</span>` : ''}</td>
-              <td>${formatCurrency(item.taxableSubtotal || item.subtotal)}</td>
+              <td>${item.name}${item.discountAmount > 0 ? ` <span class="muted">(Desc. ${formatCurrency(item.discountAmount)})</span>` : ''}</td>
+              <td>${formatQuantity(item.quantity, item.unitType)}</td>
+              <td>${formatCurrency(item.price || 0)}</td>
+              <td>${formatCurrency(item.taxableSubtotal || item.subtotal || ((Number(item.price || 0) * Number(item.quantity || 0)) - Number(item.discountAmount || 0)))}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -123,10 +130,11 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
     </div>
 
     <div class="totals">
-      <div class="row"><span>Subtotal</span><strong>${formatCurrency(sale.subtotal)}</strong></div>
+      <div class="row"><span>Subtotal (sin IVU)</span><strong>${formatCurrency((sale.subtotal || 0) - (sale.discount || 0))}</strong></div>
       ${sale.discount > 0 ? `<div class="row"><span>Descuentos</span><strong>-${formatCurrency(sale.discount)}</strong></div>` : ''}
       <div class="row"><span>IVU municipal</span><strong>${formatCurrency(sale.taxBreakdown?.municipal || 0)}</strong></div>
       <div class="row"><span>IVU estatal</span><strong>${formatCurrency(sale.taxBreakdown?.state || 0)}</strong></div>
+      <div class="row"><span>IVU total</span><strong>${formatCurrency(sale.tax || ((sale.taxBreakdown?.municipal || 0) + (sale.taxBreakdown?.state || 0)))}</strong></div>
       <div class="row"><span>Total</span><strong>${formatCurrency(sale.total)}</strong></div>
       <div class="row"><span>Tipo de pago</span><strong>${getPaymentMethodLabel(sale.paymentMethod)}</strong></div>
       ${(sale.payments || []).length > 1 ? (sale.payments || []).map((payment) => `
@@ -146,6 +154,7 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
       <p class="muted" style="margin-top:12px;">Fecha: ${formatDateTime(sale.date)}</p>
       <p class="muted">Venta: ${sale.id}</p>
       <p class="muted">${documentType === 'invoice' ? 'Factura' : 'Recibo'}</p>
+      ${chargedByLabel}
     </div>
   `;
 

@@ -28,6 +28,8 @@ import { subscribeCategories } from '../services/categoryService';
 import { commitSaleTransaction } from '../services/checkoutService';
 import { subscribeStoreStatusLogs } from '../services/storeStatusLogService';
 import { upsertWeeklyCachedSale } from '../services/weeklySalesCacheService';
+import { subscribeShifts } from '../services/shiftsService';
+import { getSpinConfigurationState, processSpinCardPayment } from '../services/spinService';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import useIsMobileDevice from '../hooks/useIsMobileDevice';
 import useScannerHidStatus from '../hooks/useScannerHidStatus';
@@ -79,6 +81,8 @@ function POS({
   const [cartSyncStatus, setCartSyncStatus] = useState('connecting');
   const [sharedCartMeta, setSharedCartMeta] = useState(DEFAULT_SHARED_POS_CART.meta);
   const [storeStatusLogs, setStoreStatusLogs] = useState([]);
+  const [shifts, setShifts] = useState([]);
+  const [selectedShiftId, setSelectedShiftId] = useState('');
   const [productsPage, setProductsPage] = useState(1);
   const [pendingProductConfig, setPendingProductConfig] = useState(null);
   const [pendingSaleSize, setPendingSaleSize] = useState('');
@@ -110,6 +114,7 @@ function POS({
   const sharedCartReadyRef = useRef(false);
   const lastSharedCartSignatureRef = useRef('');
   const sharedCartSyncTimerRef = useRef(null);
+  const spinConfiguration = useMemo(() => getSpinConfigurationState(), []);
   const terminalId = useMemo(() => getPersistentTerminalId(), []);
   const scannerReady = scannerDetected || keyboardScannerDetected;
   const scannerConnectionLabel = scannerDetected
@@ -131,6 +136,35 @@ function POS({
       name: profile?.name || user?.email || 'Sistema POS'
     }),
     [profile?.name, terminalId, user?.email, user?.uid]
+  );
+  const currentOperator = useMemo(
+    () => {
+      const currentUser = loadData().currentUser || {};
+      return {
+        id: user?.uid || currentUser.id || '',
+        name: profile?.name || user?.email || currentUser.name || 'Sistema POS',
+        role: profile?.role || 'cashier'
+      };
+    },
+    [profile?.name, profile?.role, user?.email, user?.uid]
+  );
+  const activeShifts = useMemo(
+    () => [...shifts]
+      .filter((shift) => !shift.endTime)
+      .sort((a, b) => new Date(b.startTime) - new Date(a.startTime)),
+    [shifts]
+  );
+  const operatorShift = useMemo(
+    () => activeShifts.find((shift) => (
+      shift.employeeId === user?.uid
+      || (shift.employeeEmail || '').toLowerCase() === (user?.email || '').toLowerCase()
+      || (shift.employeeName || '').toLowerCase() === (profile?.name || '').toLowerCase()
+    )) || null,
+    [activeShifts, profile?.name, user?.email, user?.uid]
+  );
+  const selectedShift = useMemo(
+    () => activeShifts.find((shift) => shift.id === selectedShiftId) || null,
+    [activeShifts, selectedShiftId]
   );
 
   useEffect(() => {
@@ -548,8 +582,12 @@ function POS({
       return 'La tienda debe estar abierta antes de cobrar.';
     }
 
+    if (profile?.role === 'admin' && activeShifts.length > 1 && !selectedShift) {
+      return 'Selecciona el turno al que le pertenece esta venta antes de cobrar.';
+    }
+
     return '';
-  }, [isStoreOpen]);
+  }, [activeShifts.length, isStoreOpen, profile?.role, selectedShift]);
 
   const ensureCheckoutReady = useCallback(async () => {
     if (!isStoreOpen) {
@@ -559,6 +597,20 @@ function POS({
 
     return true;
   }, [isStoreOpen]);
+
+  const spinConfigurationMessage = useMemo(() => {
+    if (spinConfiguration.isConfigured) {
+      return `SPIn listo en ${spinConfiguration.apiUrl} usando ${spinConfiguration.tpn || spinConfiguration.registerId}.`;
+    }
+
+    return `Falta configurar SPIn: ${spinConfiguration.missing.join(', ')}.`;
+  }, [spinConfiguration]);
+
+  const cardPaymentBlockReason = spinConfiguration.isConfigured
+    ? ''
+    : 'Configura SPIn antes de cobrar con tarjeta.';
+  const saleOwnerLabel = selectedShift?.employeeName || currentOperator.name;
+  const chargedByLabel = currentOperator.name;
 
   const handleOpenPaymentModal = async () => {
     if (cart.length === 0) {
@@ -591,6 +643,35 @@ function POS({
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeShifts(
+      (rows) => setShifts(rows || []),
+      (error) => {
+        console.error('Error subscribing shifts in POS:', error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (profile?.role === 'cashier') {
+      setSelectedShiftId(operatorShift?.id || '');
+      return;
+    }
+
+    if (selectedShiftId && activeShifts.some((shift) => shift.id === selectedShiftId)) {
+      return;
+    }
+
+    if (activeShifts.length === 1) {
+      setSelectedShiftId(activeShifts[0].id);
+      return;
+    }
+
+    setSelectedShiftId('');
+  }, [activeShifts, operatorShift?.id, profile?.role, selectedShiftId]);
 
   useEffect(() => {
     if (cart.length > 0 || isProcessingPayment || !showPaymentModal) return;
@@ -803,8 +884,6 @@ function POS({
     setIsProcessingPayment(true);
     const data = loadData();
     const saleId = paymentEntries[0]?.transaction_id || generateId('sale');
-    const cashier = profile?.name || user?.email || data.currentUser.name;
-    const cashierId = user?.uid || data.currentUser.id;
     const sale = buildTransactionRecord({
       saleId,
       cart: cartPricing,
@@ -813,9 +892,17 @@ function POS({
       tax,
       taxSummary,
       total,
-      cashier,
-      cashierId,
-      paymentEntries
+      cashier: currentOperator.name,
+      cashierId: currentOperator.id,
+      paymentEntries,
+      shiftContext: selectedShift
+        ? {
+          id: selectedShift.id,
+          employeeId: selectedShift.employeeId,
+          employeeName: selectedShift.employeeName
+        }
+        : null,
+      chargedBy: currentOperator
     });
     const persistSaleLocally = () => {
       const updatedProducts = data.products.map(product => {
@@ -893,6 +980,56 @@ function POS({
     }
   };
 
+  const processCardEntriesWithSpin = async (paymentEntries = [], transactionId) => {
+    if (!paymentEntries.some((payment) => payment.method === PAYMENT_METHODS.card)) {
+      return paymentEntries;
+    }
+
+    if (!spinConfiguration.isConfigured) {
+      throw new Error(cardPaymentBlockReason);
+    }
+
+    let processedCardCount = 0;
+
+    const processedEntries = [];
+
+    for (const paymentEntry of paymentEntries) {
+      if (paymentEntry.method !== PAYMENT_METHODS.card) {
+        processedEntries.push(paymentEntry);
+        continue;
+      }
+
+      processedCardCount += 1;
+      const shouldSendFullCartToTerminal = paymentEntries.length === 1
+        && Math.abs(Number(paymentEntry.amount || 0) - total) <= 0.009;
+
+      const spinResult = await processSpinCardPayment({
+        amount: paymentEntry.amount,
+        refId: `${transactionId}_card_${processedCardCount}`,
+        cashier: currentOperator.name,
+        cartItems: shouldSendFullCartToTerminal ? cartPricing : [],
+        subtotal: shouldSendFullCartToTerminal ? subtotal : 0,
+        discountAmount: shouldSendFullCartToTerminal ? discountAmount : 0,
+        tax: shouldSendFullCartToTerminal ? tax : 0,
+        total: shouldSendFullCartToTerminal ? total : Number(paymentEntry.amount || 0)
+      });
+
+      processedEntries.push({
+        ...paymentEntry,
+        processor: 'spin',
+        reference: paymentEntry.reference || spinResult.authCode || spinResult.pnRef || null,
+        processor_reference: spinResult.pnRef || null,
+        processor_status: spinResult.message || null,
+        processor_response: spinResult.respMSG || null,
+        processor_transaction_id: spinResult.transNum || spinResult.extData?.txnId || null,
+        processor_payment_type: spinResult.paymentType || null,
+        processor_details: spinResult
+      });
+    }
+
+    return processedEntries;
+  };
+
   const handleCashPayment = async () => {
     const receivedAmount = Number(cashReceived);
 
@@ -902,14 +1039,13 @@ function POS({
     }
 
     const changeDue = receivedAmount - total;
-    const cashier = profile?.name || user?.email || loadData().currentUser.name;
     const transactionId = generateId('sale');
     const paymentEntries = [
       buildPaymentEntry({
         transactionId,
         method: PAYMENT_METHODS.cash,
         amount: total,
-        confirmedBy: cashier,
+        confirmedBy: currentOperator.name,
         reference: paymentReference,
         amountReceived: receivedAmount,
         changeDue
@@ -927,36 +1063,46 @@ function POS({
   };
 
   const handleCardPayment = async () => {
-    const cashier = profile?.name || user?.email || loadData().currentUser.name;
+    if (!spinConfiguration.isConfigured) {
+      showNotification('error', cardPaymentBlockReason);
+      return;
+    }
+
     const transactionId = generateId('sale');
     const paymentEntries = [
       buildPaymentEntry({
         transactionId,
         method: PAYMENT_METHODS.card,
         amount: total,
-        confirmedBy: cashier,
+        confirmedBy: currentOperator.name,
         reference: paymentReference
       })
     ];
 
-    await finalizePayment(
-      paymentEntries,
-      {
-        successMessage: 'Pago con tarjeta confirmado y transaccion guardada.',
-        warningMessage: 'Pago con tarjeta confirmado localmente, pero fallo la sincronizacion con Firestore.'
-      }
-    );
+    try {
+      const processedEntries = await processCardEntriesWithSpin(paymentEntries, transactionId);
+
+      await finalizePayment(
+        processedEntries,
+        {
+          successMessage: 'Pago con tarjeta confirmado y transaccion guardada.',
+          warningMessage: 'Pago con tarjeta confirmado localmente, pero fallo la sincronizacion con Firestore.'
+        }
+      );
+    } catch (error) {
+      console.error('Error processing SPIn card payment:', error);
+      showNotification('error', error?.message || 'La terminal no pudo completar el cobro.');
+    }
   };
 
   const handleAthMovilPayment = async () => {
-    const cashier = profile?.name || user?.email || loadData().currentUser.name;
     const transactionId = generateId('sale');
     const paymentEntries = [
       buildPaymentEntry({
         transactionId,
         method: PAYMENT_METHODS.athMovil,
         amount: total,
-        confirmedBy: cashier,
+        confirmedBy: currentOperator.name,
         reference: paymentReference
       })
     ];
@@ -1007,7 +1153,6 @@ function POS({
       return;
     }
 
-    const cashier = profile?.name || user?.email || loadData().currentUser.name;
     const transactionId = generateId('sale');
     const paymentEntries = [];
 
@@ -1037,7 +1182,7 @@ function POS({
         transactionId,
         method: payment.method,
         amount,
-        confirmedBy: cashier,
+        confirmedBy: currentOperator.name,
         reference: payment.reference,
         amountReceived: isCashPayment ? receivedAmount : null,
         changeDue: isCashPayment ? Math.max(receivedAmount - amount, 0) : null
@@ -1049,13 +1194,25 @@ function POS({
       return;
     }
 
-    await finalizePayment(
-      paymentEntries,
-      {
-        openDrawer: paymentEntries.some((payment) => payment.method === PAYMENT_METHODS.cash),
-        successMessage: 'Pago split confirmado y transaccion guardada.'
-      }
-    );
+    if (paymentEntries.some((payment) => payment.method === PAYMENT_METHODS.card) && !spinConfiguration.isConfigured) {
+      showNotification('error', cardPaymentBlockReason);
+      return;
+    }
+
+    try {
+      const processedEntries = await processCardEntriesWithSpin(paymentEntries, transactionId);
+
+      await finalizePayment(
+        processedEntries,
+        {
+          openDrawer: processedEntries.some((payment) => payment.method === PAYMENT_METHODS.cash),
+          successMessage: 'Pago split confirmado y transaccion guardada.'
+        }
+      );
+    } catch (error) {
+      console.error('Error processing SPIn split payment:', error);
+      showNotification('error', error?.message || 'La terminal no pudo completar uno de los cobros.');
+    }
   };
 
   const getAssignedPrinter = (documentType) => {
@@ -1466,6 +1623,49 @@ function POS({
             <p className="text-4xl font-bold text-green-600">{formatCurrency(total)}</p>
           </div>
 
+          {profile?.role === 'admin' && activeShifts.length > 0 && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-medium text-slate-900">Turno de la venta</p>
+                  <p className="text-sm text-slate-600">
+                    Si hay varios turnos abiertos, la venta se asigna al empleado que selecciones aqui.
+                  </p>
+                </div>
+                <span className="text-xs font-medium text-slate-500">
+                  {activeShifts.length} turno{activeShifts.length === 1 ? '' : 's'} abierto{activeShifts.length === 1 ? '' : 's'}
+                </span>
+              </div>
+
+              <select
+                value={selectedShiftId}
+                onChange={(e) => setSelectedShiftId(e.target.value)}
+                className="input w-full"
+                disabled={isProcessingPayment}
+              >
+                <option value="">
+                  {activeShifts.length > 1 ? 'Selecciona un turno abierto' : 'Sin turno seleccionado'}
+                </option>
+                {activeShifts.map((shift) => (
+                  <option key={shift.id} value={shift.id}>
+                    {shift.employeeName} - {shift.status === 'on_break' ? 'En break' : 'Activo'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm space-y-1">
+            <div className="flex justify-between gap-3">
+              <span className="text-gray-600">Venta para</span>
+              <strong className="text-right text-gray-900">{saleOwnerLabel}</strong>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-gray-600">Cobrado por</span>
+              <strong className="text-right text-gray-900">{chargedByLabel}</strong>
+            </div>
+          </div>
+
           {!selectedPaymentMethod && (
             <>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1588,8 +1788,12 @@ function POS({
           {selectedPaymentMethod === PAYMENT_METHODS.card && (
             <div className="space-y-4">
               <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                <p className="font-medium text-blue-800">Cobra al cliente usando la terminal Clover.</p>
-                <p className="text-sm text-blue-700">Confirma solo cuando la terminal muestre Aprobado.</p>
+                <p className="font-medium text-blue-800">Cobro automatico por terminal SPIn.</p>
+                <p className="text-sm text-blue-700">Al confirmar, el sistema enviara el monto al POS y esperara la aprobacion real antes de guardar la venta.</p>
+              </div>
+
+              <div className={`rounded-lg border p-4 text-sm ${spinConfiguration.isConfigured ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                {spinConfigurationMessage}
               </div>
 
               <div>
@@ -1614,9 +1818,9 @@ function POS({
                 <button
                   onClick={handleCardPayment}
                   className="flex-1 btn btn-primary"
-                  disabled={isProcessingPayment || Boolean(checkoutBlockReason)}
+                  disabled={isProcessingPayment || Boolean(checkoutBlockReason) || Boolean(cardPaymentBlockReason)}
                 >
-                  Confirmar pago con tarjeta
+                  Cobrar en terminal
                 </button>
               </div>
             </div>
@@ -1665,6 +1869,12 @@ function POS({
                 <p className="font-medium text-amber-800">Pago split</p>
                 <p className="text-sm text-amber-700">Divide el total entre dos o mas metodos. La suma debe ser exacta.</p>
               </div>
+
+              {splitPayments.some((payment) => payment.method === PAYMENT_METHODS.card) && (
+                <div className={`rounded-lg border p-4 text-sm ${spinConfiguration.isConfigured ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                  {spinConfigurationMessage}
+                </div>
+              )}
 
               <div className="space-y-3">
                 {splitPayments.map((payment, index) => (
@@ -1776,7 +1986,7 @@ function POS({
                 <button
                   onClick={handleSplitPayment}
                   className="flex-1 btn btn-primary"
-                  disabled={isProcessingPayment || Boolean(checkoutBlockReason)}
+                  disabled={isProcessingPayment || Boolean(checkoutBlockReason) || (splitPayments.some((payment) => payment.method === PAYMENT_METHODS.card) && Boolean(cardPaymentBlockReason))}
                 >
                   Confirmar split
                 </button>
@@ -2043,6 +2253,9 @@ function POS({
               <p><strong>Recibo #:</strong> {lastSale.id.split('_')[1].toUpperCase()}</p>
               <p><strong>Fecha:</strong> {new Date(lastSale.date).toLocaleString()}</p>
               <p><strong>Cajero:</strong> {lastSale.cashier}</p>
+              {lastSale.chargedBy && lastSale.chargedBy !== lastSale.cashier && (
+                <p><strong>Cobrado por:</strong> {lastSale.chargedBy}</p>
+              )}
             </div>
 
             <div className="border-t pt-4">
@@ -2051,7 +2264,8 @@ function POS({
                   <tr className="border-b">
                     <th className="text-left py-2">Producto</th>
                     <th className="text-center py-2">Cant.</th>
-                    <th className="text-right py-2">Precio</th>
+                    <th className="text-right py-2">Precio unit.</th>
+                    <th className="text-right py-2">Subtotal</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2064,7 +2278,10 @@ function POS({
                         )}
                       </td>
                       <td className="text-center py-2">{formatQuantity(item.quantity, item.unitType)}</td>
-                      <td className="text-right py-2">{formatCurrency(item.taxableSubtotal || item.subtotal)}</td>
+                      <td className="text-right py-2">{formatCurrency(item.price || 0)}</td>
+                      <td className="text-right py-2">
+                        {formatCurrency(item.taxableSubtotal || item.subtotal || ((Number(item.price || 0) * Number(item.quantity || 0)) - Number(item.discountAmount || 0)))}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -2073,8 +2290,8 @@ function POS({
 
             <div className="border-t pt-4 space-y-1">
               <div className="flex justify-between">
-                <span>Subtotal:</span>
-                <span>{formatCurrency(lastSale.subtotal)}</span>
+                <span>Subtotal (sin IVU):</span>
+                <span>{formatCurrency((lastSale.subtotal || 0) - (lastSale.discount || 0))}</span>
               </div>
               {lastSale.discount > 0 && (
                 <div className="flex justify-between text-green-600">
@@ -2092,7 +2309,7 @@ function POS({
               </div>
               <div className="flex justify-between">
                 <span>IVU Total:</span>
-                <span>{formatCurrency(lastSale.tax)}</span>
+                <span>{formatCurrency(lastSale.tax || ((lastSale.taxBreakdown?.state || 0) + (lastSale.taxBreakdown?.municipal || 0)))}</span>
               </div>
               <div className="flex justify-between text-lg font-bold pt-2 border-t">
                 <span>Total:</span>

@@ -32,7 +32,7 @@ export const getPaymentMethodLabel = (method) => {
 export const getPaymentProcessor = (method) => {
   switch (normalizePaymentMethod(method)) {
     case PAYMENT_METHODS.card:
-      return 'clover';
+      return 'spin';
     default:
       return '';
   }
@@ -48,13 +48,19 @@ export const buildTransactionRecord = ({
   total,
   cashier,
   cashierId,
-  paymentEntries
+  paymentEntries,
+  shiftContext = null,
+  chargedBy = null
 }) => {
   const createdAt = new Date().toISOString();
   const primaryPayment = paymentEntries[0] || {};
   const normalizedMethod = paymentEntries.length > 1
     ? PAYMENT_METHODS.split
     : normalizePaymentMethod(primaryPayment.method);
+  const assignedCashierName = shiftContext?.employeeName || cashier;
+  const assignedCashierId = shiftContext?.employeeId || cashierId;
+  const chargedByName = chargedBy?.name || cashier;
+  const chargedById = chargedBy?.id || cashierId;
 
   return {
     id: saleId,
@@ -89,8 +95,14 @@ export const buildTransactionRecord = ({
     paymentMethod: normalizedMethod,
     payment_method: normalizedMethod,
     payments: paymentEntries,
-    cashier,
-    cashierId
+    cashier: assignedCashierName,
+    cashierId: assignedCashierId,
+    shiftId: shiftContext?.id || null,
+    shiftEmployeeName: assignedCashierName,
+    shiftEmployeeId: assignedCashierId,
+    chargedBy: chargedByName,
+    chargedById,
+    chargedByRole: chargedBy?.role || null
   };
 };
 
@@ -101,21 +113,35 @@ export const buildPaymentEntry = ({
   confirmedBy,
   reference = '',
   amountReceived = null,
-  changeDue = null
+  changeDue = null,
+  processor = null,
+  processorReference = null,
+  processorStatus = null,
+  processorResponse = null,
+  processorTransactionId = null,
+  processorPaymentType = null,
+  processorDetails = null
 }) => {
   const normalizedMethod = normalizePaymentMethod(method);
+  const resolvedProcessor = processor !== null ? processor : getPaymentProcessor(normalizedMethod) || null;
 
   return {
     id: `payment_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
     transaction_id: transactionId,
     method: normalizedMethod,
     amount: Math.round(amount * 100) / 100,
-    processor: getPaymentProcessor(normalizedMethod) || null,
+    processor: resolvedProcessor,
     reference: reference || null,
     confirmed_by: confirmedBy,
     confirmed_at: new Date().toISOString(),
     status: 'paid',
     amount_received: amountReceived !== null ? Math.round(amountReceived * 100) / 100 : null,
-    change_due: changeDue !== null ? Math.round(changeDue * 100) / 100 : null
+    change_due: changeDue !== null ? Math.round(changeDue * 100) / 100 : null,
+    processor_reference: processorReference || null,
+    processor_status: processorStatus || null,
+    processor_response: processorResponse || null,
+    processor_transaction_id: processorTransactionId || null,
+    processor_payment_type: processorPaymentType || null,
+    processor_details: processorDetails || null
   };
 };
