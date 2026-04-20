@@ -9,9 +9,11 @@ import { subscribeEmployees } from '../services/employeesService';
 import { subscribeSales } from '../services/salesService';
 import { verifyFirestoreAvailability } from '../services/firestoreHealthService';
 import { createStoreStatusLog, subscribeStoreStatusLogs } from '../services/storeStatusLogService';
-import { PAYMENT_METHODS } from '../utils/paymentUtils';
+import { subscribeSpecialOrderPayments } from '../services/specialOrdersService';
+import { normalizePaymentMethod, PAYMENT_METHODS } from '../utils/paymentUtils';
 import { buildStoreClosurePrintHtml } from '../utils/printTemplates';
 import { getNetSaleTotal, getSaleRefundTotal, isReportableSale } from '../utils/salesUtils';
+import { getStandaloneSpecialOrderPaymentNet } from '../utils/specialOrderUtils';
 import { printHtmlDocument } from '../services/printService';
 
 const CASH_COUNT_FIELDS = [
@@ -53,6 +55,7 @@ const StorePage = () => {
   const { user, profile } = useAuth();
   const [employees, setEmployees] = useState([]);
   const [sales, setSales] = useState([]);
+  const [specialOrderPayments, setSpecialOrderPayments] = useState([]);
   const [storeStatusLogs, setStoreStatusLogs] = useState([]);
   const [showOpenModal, setShowOpenModal] = useState(false);
   const [showCloseModal, setShowCloseModal] = useState(false);
@@ -94,6 +97,7 @@ const StorePage = () => {
     const data = loadData();
     setEmployees(data.employees || []);
     setSales(data.sales || []);
+    setSpecialOrderPayments(data.specialOrderPayments || []);
 
     const unsubEmployees = subscribeEmployees(
       (rows) => setEmployees(rows),
@@ -107,11 +111,16 @@ const StorePage = () => {
       (rows) => setStoreStatusLogs(rows),
       (error) => console.error('Error subscribing store status logs in store page:', error)
     );
+    const unsubSpecialPayments = subscribeSpecialOrderPayments(
+      (rows) => setSpecialOrderPayments(rows),
+      (error) => console.error('Error subscribing special order payments in store page:', error)
+    );
 
     return () => {
       unsubEmployees();
       unsubSales();
       unsubStoreStatusLogs();
+      unsubSpecialPayments();
     };
   }, []);
 
@@ -160,26 +169,39 @@ const StorePage = () => {
   const closeSummary = useMemo(() => {
     if (!activeStoreSession) return null;
 
+    const openedAtMs = new Date(activeStoreSession.createdAt).getTime();
     const paidSales = activeSessionSales.filter(isReportableSale);
+    const standalonePayments = (specialOrderPayments || []).filter((payment) => {
+      const paymentTime = new Date(payment.createdAt || payment.confirmed_at).getTime();
+      return paymentTime >= openedAtMs;
+    });
+    const activeStandaloneSpecialRevenue = roundMoney(getStandaloneSpecialOrderPaymentNet(
+      standalonePayments,
+      sales,
+      () => true
+    ));
     const grossSales = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.subtotal || 0), 0));
     const discounts = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.discount || 0), 0));
     const refunds = roundMoney(activeSessionSales.reduce((sum, sale) => sum + getSaleRefundTotal(sale), 0));
     const taxes = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.tax || 0), 0));
-    const totalTendered = roundMoney(paidSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0));
+    const totalTendered = roundMoney(paidSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + activeStandaloneSpecialRevenue);
     const cashPayments = roundMoney(
       paidSales
         .filter((sale) => sale.paymentMethod === PAYMENT_METHODS.cash)
-        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0)
+        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) +
+      getStandaloneSpecialOrderPaymentNet(standalonePayments, sales, (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.cash)
     );
     const athMovilPayments = roundMoney(
       paidSales
         .filter((sale) => sale.paymentMethod === PAYMENT_METHODS.athMovil)
-        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0)
+        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) +
+      getStandaloneSpecialOrderPaymentNet(standalonePayments, sales, (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.athMovil)
     );
     const cardPayments = roundMoney(
       paidSales
         .filter((sale) => sale.paymentMethod === PAYMENT_METHODS.card)
-        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0)
+        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) +
+      getStandaloneSpecialOrderPaymentNet(standalonePayments, sales, (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.card)
     );
     const cashRefunds = roundMoney(
       activeSessionSales
@@ -219,7 +241,7 @@ const StorePage = () => {
         card: cardPayments
       }
     };
-  }, [activeSessionSales, activeStoreSession, closeForm.actualCashAmount, closeForm.paidIn, closeForm.paidOut, currentEmployee?.name, profile?.name, user?.email]);
+  }, [activeSessionSales, activeStoreSession, closeForm.actualCashAmount, closeForm.paidIn, closeForm.paidOut, currentEmployee?.name, profile?.name, sales, specialOrderPayments, user?.email]);
 
   const historyRows = useMemo(() => {
     return [...storeStatusLogs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));

@@ -1,5 +1,6 @@
 import { formatCurrency, formatDateTime, formatQuantity } from '../data/demoData';
 import { getPaymentMethodLabel } from './paymentUtils';
+import { getSaleFinancialSummary } from './salesUtils';
 
 const basePrintDocument = ({ title, body }) => `
   <!doctype html>
@@ -94,6 +95,7 @@ const dottedDivider = `
 
 export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName = '' }) => {
   const title = documentType === 'invoice' ? `Factura ${sale.id}` : `Recibo ${sale.id}`;
+  const summary = getSaleFinancialSummary(sale);
   const body = `
     ${buildStoreHeader({
       employeeLabel: 'Empleado',
@@ -112,10 +114,15 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
           </tr>
         </thead>
         <tbody>
-          ${sale.items.map((item) => `
+          ${summary.items.map((item) => `
             <tr>
-              <td>${item.name}${item.quantity > 1 ? ` x${formatQuantity(item.quantity, item.unitType)}` : ''}${item.discountAmount > 0 ? ` <span class="muted">(Desc. ${formatCurrency(item.discountAmount)})</span>` : ''}</td>
-              <td>${formatCurrency(item.taxableSubtotal || item.subtotal)}</td>
+              <td>
+                ${item.name}${item.quantity > 1 ? ` x${formatQuantity(item.quantity, item.unitType)}` : ''}
+                ${item.discountAmount > 0
+                  ? `<div class="muted" style="margin-top:4px;">Descuento ${item.discountType === 'percentage' ? `${item.discountValue}%` : formatCurrency(item.discountValue)}: -${formatCurrency(item.discountAmount)}</div>`
+                  : ''}
+              </td>
+              <td>${formatCurrency(item.taxableSubtotal)}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -123,11 +130,12 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
     </div>
 
     <div class="totals">
-      <div class="row"><span>Subtotal</span><strong>${formatCurrency(sale.subtotal)}</strong></div>
-      ${sale.discount > 0 ? `<div class="row"><span>Descuentos</span><strong>-${formatCurrency(sale.discount)}</strong></div>` : ''}
-      <div class="row"><span>IVU municipal</span><strong>${formatCurrency(sale.taxBreakdown?.municipal || 0)}</strong></div>
-      <div class="row"><span>IVU estatal</span><strong>${formatCurrency(sale.taxBreakdown?.state || 0)}</strong></div>
-      <div class="row"><span>Total</span><strong>${formatCurrency(sale.total)}</strong></div>
+      <div class="row"><span>Subtotal</span><strong>${formatCurrency(summary.subtotal)}</strong></div>
+      ${summary.discount > 0 ? `<div class="row"><span>Descuentos</span><strong>-${formatCurrency(summary.discount)}</strong></div>` : ''}
+      ${summary.taxBreakdown.state > 0 ? `<div class="row"><span>IVU estatal</span><strong>${formatCurrency(summary.taxBreakdown.state)}</strong></div>` : ''}
+      ${summary.taxBreakdown.municipal > 0 ? `<div class="row"><span>IVU municipal</span><strong>${formatCurrency(summary.taxBreakdown.municipal)}</strong></div>` : ''}
+      <div class="row"><span>IVU total</span><strong>${formatCurrency(summary.tax)}</strong></div>
+      <div class="row"><span>Total</span><strong>${formatCurrency(summary.total)}</strong></div>
       <div class="row"><span>Tipo de pago</span><strong>${getPaymentMethodLabel(sale.paymentMethod)}</strong></div>
       ${(sale.payments || []).length > 1 ? (sale.payments || []).map((payment) => `
         <div class="row"><span>${getPaymentMethodLabel(payment.method)}</span><strong>${formatCurrency(payment.amount || 0)}</strong></div>

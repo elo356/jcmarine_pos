@@ -38,8 +38,9 @@ import {
   getPaymentMethodLabel,
   PAYMENT_METHODS
 } from '../utils/paymentUtils';
-import { calculateItemPricing, IVU_MUNICIPAL_RATE, IVU_STATE_RATE } from '../utils/cartPricing';
+import { calculateItemPricing } from '../utils/cartPricing';
 import { buildSalePrintHtml } from '../utils/printTemplates';
+import { getSaleFinancialSummary } from '../utils/salesUtils';
 import { printHtmlDocument } from '../services/printService';
 
 const SHARED_CART_SYNC_DEBOUNCE_MS = 250;
@@ -521,6 +522,10 @@ function POS({
   );
   const tax = taxSummary.state + taxSummary.municipal;
   const total = taxableAmount + tax;
+  const lastSaleSummary = useMemo(
+    () => (lastSale ? getSaleFinancialSummary(lastSale) : null),
+    [lastSale]
+  );
 
   const showNotification = (type, message) => {
     setNotification({ type, message, id: Date.now() });
@@ -2055,12 +2060,14 @@ function POS({
                   </tr>
                 </thead>
                 <tbody>
-                  {lastSale.items.map((item, index) => (
+                  {(lastSaleSummary?.items || lastSale.items).map((item, index) => (
                     <tr key={index} className="border-b">
                       <td className="py-2">
                         <div>{item.name}</div>
                         {item.discountAmount > 0 && (
-                          <div className="text-xs text-green-600">Desc. -{formatCurrency(item.discountAmount)}</div>
+                          <div className="text-xs text-green-600">
+                            Desc. {item.discountType === 'percentage' ? `${item.discountValue}%` : formatCurrency(item.discountValue)} -{formatCurrency(item.discountAmount)}
+                          </div>
                         )}
                       </td>
                       <td className="text-center py-2">{formatQuantity(item.quantity, item.unitType)}</td>
@@ -2074,29 +2081,33 @@ function POS({
             <div className="border-t pt-4 space-y-1">
               <div className="flex justify-between">
                 <span>Subtotal:</span>
-                <span>{formatCurrency(lastSale.subtotal)}</span>
+                <span>{formatCurrency(lastSaleSummary?.subtotal ?? lastSale.subtotal)}</span>
               </div>
-              {lastSale.discount > 0 && (
+              {(lastSaleSummary?.discount ?? lastSale.discount) > 0 && (
                 <div className="flex justify-between text-green-600">
                   <span>Descuentos:</span>
-                  <span>-{formatCurrency(lastSale.discount)}</span>
+                  <span>-{formatCurrency(lastSaleSummary?.discount ?? lastSale.discount)}</span>
+                </div>
+              )}
+              {(lastSaleSummary?.taxBreakdown?.state ?? lastSale.taxBreakdown?.state ?? 0) > 0 && (
+                <div className="flex justify-between">
+                  <span>IVU Estatal (10.5%):</span>
+                  <span>{formatCurrency((lastSaleSummary?.taxBreakdown?.state ?? lastSale.taxBreakdown?.state) || 0)}</span>
+                </div>
+              )}
+              {(lastSaleSummary?.taxBreakdown?.municipal ?? lastSale.taxBreakdown?.municipal ?? 0) > 0 && (
+                <div className="flex justify-between">
+                  <span>IVU Municipal (1%):</span>
+                  <span>{formatCurrency((lastSaleSummary?.taxBreakdown?.municipal ?? lastSale.taxBreakdown?.municipal) || 0)}</span>
                 </div>
               )}
               <div className="flex justify-between">
-                <span>IVU Estatal (10.5%):</span>
-                <span>{formatCurrency(lastSale.taxBreakdown?.state || 0)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>IVU Municipal (1%):</span>
-                <span>{formatCurrency(lastSale.taxBreakdown?.municipal || 0)}</span>
-              </div>
-              <div className="flex justify-between">
                 <span>IVU Total:</span>
-                <span>{formatCurrency(lastSale.tax)}</span>
+                <span>{formatCurrency(lastSaleSummary?.tax ?? lastSale.tax)}</span>
               </div>
               <div className="flex justify-between text-lg font-bold pt-2 border-t">
                 <span>Total:</span>
-                <span className="text-green-600">{formatCurrency(lastSale.total)}</span>
+                <span className="text-green-600">{formatCurrency(lastSaleSummary?.total ?? lastSale.total)}</span>
               </div>
             </div>
 
