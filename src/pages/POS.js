@@ -600,6 +600,10 @@ function POS({
 
   const spinConfigurationMessage = useMemo(() => {
     if (spinConfiguration.isConfigured) {
+      if (spinConfiguration.merchantIdIgnored) {
+        return `SPIn listo en ${spinConfiguration.apiUrl} usando ${spinConfiguration.tpn || spinConfiguration.registerId}. REACT_APP_SPIN_MERCHANT_ID se ignoro porque no coincide con el formato esperado por SPIn.`;
+      }
+
       return `SPIn listo en ${spinConfiguration.apiUrl} usando ${spinConfiguration.tpn || spinConfiguration.registerId}.`;
     }
 

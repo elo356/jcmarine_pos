@@ -5,6 +5,7 @@ const DEFAULT_PRINT_RECEIPT = 'No';
 const DEFAULT_SIG_CAPTURE = 'No';
 const DEFAULT_OPERATIONAL_TIMEOUT = 120;
 const DEFAULT_NOTIFY_CUSTOMER = true;
+const SPIN_PROXY_ENDPOINT = '/spin-proxy?TerminalTransaction=';
 
 const boolToString = (value) => (value ? 'true' : 'false');
 
@@ -36,6 +37,15 @@ const ensureAbsoluteSpinUrl = (value = '') => {
 
 const buildTerminalEndpoint = (apiUrl = '') => {
   const normalized = ensureAbsoluteSpinUrl(apiUrl || DEFAULT_SPIN_API_URL);
+
+  if (
+    typeof window !== 'undefined'
+    && process.env.NODE_ENV === 'development'
+    && /^https?:\/\//i.test(normalized)
+    && !normalized.toLowerCase().startsWith(window.location.origin.toLowerCase())
+  ) {
+    return SPIN_PROXY_ENDPOINT;
+  }
 
   if (!normalized) {
     return `${DEFAULT_SPIN_API_URL}${DEFAULT_TRANSACTION_PATH}`;
@@ -143,6 +153,34 @@ const isTimeoutResponse = (response = {}) => {
   return /timed?\s*out|timeout/.test(statusText);
 };
 
+const getSpinErrorMessage = (response = null, fallback = 'La terminal rechazo la transaccion.') => {
+  if (!response || typeof response !== 'object') {
+    return fallback;
+  }
+
+  const message = String(response.message || '').trim();
+  const respMSG = String(response.respMSG || '').trim();
+  const details = [];
+
+  if (message && !/^(error|failed?|failure)$/i.test(message)) {
+    details.push(message);
+  }
+
+  if (respMSG && respMSG.toLowerCase() !== message.toLowerCase()) {
+    details.push(respMSG);
+  }
+
+  if (details.length > 0) {
+    return details.join(': ');
+  }
+
+  if (message) {
+    return message;
+  }
+
+  return fallback;
+};
+
 const createSpinError = (message, response = null) => {
   const error = new Error(message);
   error.name = 'SpinError';
@@ -150,12 +188,31 @@ const createSpinError = (message, response = null) => {
   return error;
 };
 
+const sanitizeMerchantId = (value = '') => {
+  const normalized = String(value || '').trim();
+
+  if (!normalized) {
+    return '';
+  }
+
+  return normalized.length <= 12 ? normalized : '';
+};
+
+const normalizeAscii = (value = '') => String(value || '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '');
+
+const sanitizeSpinIdentifier = (value = '', maxLength = 50) => normalizeAscii(value)
+  .replace(/[^A-Za-z0-9]/g, '')
+  .slice(0, maxLength);
+
 export const getSpinConfigurationState = () => {
   const apiUrl = String(process.env.REACT_APP_SPIN_API_URL || DEFAULT_SPIN_API_URL).trim();
   const registerId = String(process.env.REACT_APP_SPIN_REGISTER_ID || '').trim();
   const authKey = String(process.env.REACT_APP_SPIN_AUTH_KEY || '').trim();
   const tpn = String(process.env.REACT_APP_SPIN_TPN || '').trim();
-  const merchantId = String(process.env.REACT_APP_SPIN_MERCHANT_ID || '').trim();
+  const rawMerchantId = String(process.env.REACT_APP_SPIN_MERCHANT_ID || '').trim();
+  const merchantId = sanitizeMerchantId(rawMerchantId);
   // Runtime behavior is controlled by system defaults and transaction context, not .env toggles.
   const paymentType = DEFAULT_PAYMENT_TYPE;
   const printReceipt = DEFAULT_PRINT_RECEIPT;
@@ -176,6 +233,7 @@ export const getSpinConfigurationState = () => {
     authKey,
     tpn,
     merchantId,
+    merchantIdIgnored: Boolean(rawMerchantId) && !merchantId,
     paymentType,
     printReceipt,
     sigCapture,
@@ -273,12 +331,21 @@ const buildRequestXml = (tags = {}) => {
 };
 
 const sendSpinRequest = async (requestXml, configuration) => {
-  const response = await fetch(`${configuration.endpoint}${encodeURIComponent(requestXml)}`, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/xml, text/xml, text/plain, */*'
-    }
-  });
+  let response;
+
+  try {
+    response = await fetch(`${configuration.endpoint}${encodeURIComponent(requestXml)}`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/xml, text/xml, text/plain, */*'
+      }
+    });
+  } catch (error) {
+    throw createSpinError(
+      'No se pudo conectar con SPIn. Verifica el proxy, la red y que la terminal este en linea.',
+      { cause: error?.message || String(error) }
+    );
+  }
 
   const rawText = await response.text();
 
@@ -291,19 +358,22 @@ const sendSpinRequest = async (requestXml, configuration) => {
 
 export const runSpinStatusCheck = async ({ refId, paymentType }) => {
   const configuration = getSpinConfigurationState();
+  const safeRefId = sanitizeSpinIdentifier(refId, 50);
 
   if (!configuration.isConfigured) {
     throw createSpinError(`Falta configurar SPIn: ${configuration.missing.join(', ')}`);
+  }
+
+  if (!safeRefId) {
+    throw createSpinError('SPIn requiere un RefId valido para consultar el estado del pago.');
   }
 
   const requestXml = buildRequestXml({
     AuthKey: configuration.authKey,
     PaymentType: paymentType || configuration.paymentType,
     RegisterId: configuration.registerId,
-    TPN: configuration.tpn,
-    MerchantId: configuration.merchantId,
     TransType: 'Status',
-    RefId: refId,
+    RefId: safeRefId,
     PrintReceipt: configuration.printReceipt
   });
 
@@ -337,7 +407,6 @@ const runSpinCartDisplay = async ({ cartItems, subtotal, discountAmount, tax, to
 export const processSpinCardPayment = async ({
   amount,
   refId,
-  cashier,
   paymentType,
   cartItems = [],
   subtotal = 0,
@@ -346,12 +415,13 @@ export const processSpinCardPayment = async ({
   total = 0
 }) => {
   const configuration = getSpinConfigurationState();
+  const safeRefId = sanitizeSpinIdentifier(refId, 50);
 
   if (!configuration.isConfigured) {
     throw createSpinError(`Falta configurar SPIn: ${configuration.missing.join(', ')}`);
   }
 
-  if (!refId) {
+  if (!safeRefId) {
     throw createSpinError('SPIn requiere un RefId unico para cada pago.');
   }
 
@@ -374,18 +444,11 @@ export const processSpinCardPayment = async ({
     CashbackAmount: '0.00',
     Frequency: 'OneTime',
     CustomFee: '0.00',
-    OperationalTimeout: configuration.operationalTimeout,
-    TaxAmount: Number(tax) > 0 ? formatAmount(tax) : '',
-    IsvId: configuration.isvId,
-    ReconId: configuration.reconIdPrefix ? `${configuration.reconIdPrefix}${String(refId).slice(-10)}` : '',
-    RefId: refId,
+    RefId: safeRefId,
     RegisterId: configuration.registerId,
-    TPN: configuration.tpn,
-    MerchantId: configuration.merchantId,
     AuthKey: configuration.authKey,
     PrintReceipt: configuration.printReceipt,
-    SigCapture: configuration.sigCapture,
-    PerformedBy: cashier
+    SigCapture: configuration.sigCapture
   });
 
   const initialResponse = await sendSpinRequest(requestXml, configuration);
@@ -399,7 +462,7 @@ export const processSpinCardPayment = async ({
 
   if (isTimeoutResponse(initialResponse)) {
     const statusResponse = await runSpinStatusCheck({
-      refId,
+      refId: safeRefId,
       paymentType: effectivePaymentType
     });
 
@@ -411,13 +474,13 @@ export const processSpinCardPayment = async ({
     }
 
     throw createSpinError(
-      statusResponse.message || statusResponse.respMSG || 'SPIn no pudo confirmar el estado del pago.',
+      getSpinErrorMessage(statusResponse, 'SPIn no pudo confirmar el estado del pago.'),
       statusResponse
     );
   }
 
   throw createSpinError(
-    initialResponse.message || initialResponse.respMSG || 'La terminal rechazo la transaccion.',
+    getSpinErrorMessage(initialResponse),
     initialResponse
   );
 };
