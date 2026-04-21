@@ -717,7 +717,7 @@ const StorePage = () => {
             Aquí queda el historial de tienda con aperturas, cierres y cuadre registrado.
           </p>
         </div>
-        <div className="table-container">
+        <div className="table-container max-h-[26rem] overflow-y-auto">
           <table className="table">
             <thead>
               <tr>

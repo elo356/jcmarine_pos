@@ -12,6 +12,7 @@ import {
   Printer,
   ClipboardList,
   ShieldCheck,
+  FileText,
   Menu,
   X,
   LogOut,
@@ -30,6 +31,7 @@ import Reports from './pages/Reports';
 import Printers from './pages/Printers';
 import SpecialOrders from './pages/SpecialOrders';
 import RolesPermissions from './pages/RolesPermissions';
+import FinancePage from './pages/Finance';
 import Login from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
 import { startSessionPresence } from './services/systemPresenceService';
@@ -47,6 +49,7 @@ const SIDEBAR_ITEMS = [
   { id: 'inventory', label: 'Inventario', icon: Warehouse },
   { id: 'shifts', label: 'Turnos', icon: Clock },
   { id: 'store', label: 'Tienda', icon: Store },
+  { id: 'finance', label: 'Gastos y facturas', icon: FileText },
   { id: 'employees', label: 'Empleados', icon: Users },
   { id: 'reports', label: 'Reportes', icon: BarChart3 },
   { id: 'printers', label: 'Impresoras', icon: Printer },
@@ -142,6 +145,8 @@ function App() {
         return <Shifts />;
       case 'store':
         return <StorePage />;
+      case 'finance':
+        return <FinancePage />;
       case 'employees':
         return <Employees />;
       case 'reports':
