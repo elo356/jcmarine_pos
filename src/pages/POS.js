@@ -47,8 +47,13 @@ import { printHtmlDocument } from '../services/printService';
 
 const SHARED_CART_SYNC_DEBOUNCE_MS = 250;
 const DEFAULT_ITEM_DISCOUNT = { type: 'percentage', value: 0 };
+const CARD_PAYMENT_MODES = {
+  terminal: 'terminal',
+  manual: 'manual'
+};
 const DEFAULT_SPLIT_PAYMENT = {
   method: PAYMENT_METHODS.cash,
+  cardMode: CARD_PAYMENT_MODES.terminal,
   amount: '',
   reference: '',
   cashReceived: ''
@@ -75,6 +80,7 @@ function POS({
   const [lastSale, setLastSale] = useState(null);
   const [notification, setNotification] = useState(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('');
+  const [cardPaymentMode, setCardPaymentMode] = useState(CARD_PAYMENT_MODES.terminal);
   const [cashReceived, setCashReceived] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [splitPayments, setSplitPayments] = useState([{ ...DEFAULT_SPLIT_PAYMENT }]);
@@ -569,6 +575,7 @@ function POS({
 
   const resetPaymentState = useCallback(() => {
     setSelectedPaymentMethod('');
+    setCardPaymentMode(CARD_PAYMENT_MODES.terminal);
     setCashReceived('');
     setPaymentReference('');
     setSplitPayments([{ ...DEFAULT_SPLIT_PAYMENT }]);
@@ -990,7 +997,7 @@ function POS({
   };
 
   const processCardEntriesWithSpin = async (paymentEntries = [], transactionId) => {
-    if (!paymentEntries.some((payment) => payment.method === PAYMENT_METHODS.card)) {
+    if (!paymentEntries.some((payment) => payment.method === PAYMENT_METHODS.card && payment.processor === 'spin')) {
       return paymentEntries;
     }
 
@@ -1003,7 +1010,7 @@ function POS({
     const processedEntries = [];
 
     for (const paymentEntry of paymentEntries) {
-      if (paymentEntry.method !== PAYMENT_METHODS.card) {
+      if (paymentEntry.method !== PAYMENT_METHODS.card || paymentEntry.processor !== 'spin') {
         processedEntries.push(paymentEntry);
         continue;
       }
@@ -1072,7 +1079,9 @@ function POS({
   };
 
   const handleCardPayment = async () => {
-    if (!spinConfiguration.isConfigured) {
+    const requiresTerminal = cardPaymentMode === CARD_PAYMENT_MODES.terminal;
+
+    if (requiresTerminal && !spinConfiguration.isConfigured) {
       showNotification('error', cardPaymentBlockReason);
       return;
     }
@@ -1084,18 +1093,26 @@ function POS({
         method: PAYMENT_METHODS.card,
         amount: total,
         confirmedBy: currentOperator.name,
-        reference: paymentReference
+        reference: paymentReference,
+        processor: requiresTerminal ? 'spin' : 'manual',
+        processorDetails: requiresTerminal ? null : { entryMode: CARD_PAYMENT_MODES.manual }
       })
     ];
 
     try {
-      const processedEntries = await processCardEntriesWithSpin(paymentEntries, transactionId);
+      const processedEntries = requiresTerminal
+        ? await processCardEntriesWithSpin(paymentEntries, transactionId)
+        : paymentEntries;
 
       await finalizePayment(
         processedEntries,
         {
-          successMessage: 'Pago con tarjeta confirmado y transaccion guardada.',
-          warningMessage: 'Pago con tarjeta confirmado localmente, pero fallo la sincronizacion con Firestore.'
+          successMessage: requiresTerminal
+            ? 'Pago con tarjeta por terminal confirmado y transaccion guardada.'
+            : 'Pago con tarjeta manual confirmado y transaccion guardada.',
+          warningMessage: requiresTerminal
+            ? 'Pago con tarjeta por terminal confirmado localmente, pero fallo la sincronizacion con Firestore.'
+            : 'Pago con tarjeta manual confirmado localmente, pero fallo la sincronizacion con Firestore.'
         }
       );
     } catch (error) {
@@ -1136,6 +1153,10 @@ function POS({
 
       if (field === 'method' && value !== PAYMENT_METHODS.cash) {
         nextPayment.cashReceived = '';
+      }
+
+      if (field === 'method' && value !== PAYMENT_METHODS.card) {
+        nextPayment.cardMode = CARD_PAYMENT_MODES.terminal;
       }
 
       return nextPayment;
@@ -1193,8 +1214,14 @@ function POS({
         amount,
         confirmedBy: currentOperator.name,
         reference: payment.reference,
+        processor: payment.method === PAYMENT_METHODS.card
+          ? (payment.cardMode === CARD_PAYMENT_MODES.manual ? 'manual' : 'spin')
+          : null,
         amountReceived: isCashPayment ? receivedAmount : null,
-        changeDue: isCashPayment ? Math.max(receivedAmount - amount, 0) : null
+        changeDue: isCashPayment ? Math.max(receivedAmount - amount, 0) : null,
+        processorDetails: payment.method === PAYMENT_METHODS.card && payment.cardMode === CARD_PAYMENT_MODES.manual
+          ? { entryMode: CARD_PAYMENT_MODES.manual }
+          : null
       }));
     }
 
@@ -1203,7 +1230,10 @@ function POS({
       return;
     }
 
-    if (paymentEntries.some((payment) => payment.method === PAYMENT_METHODS.card) && !spinConfiguration.isConfigured) {
+    if (
+      paymentEntries.some((payment) => payment.method === PAYMENT_METHODS.card && payment.processor === 'spin')
+      && !spinConfiguration.isConfigured
+    ) {
       showNotification('error', cardPaymentBlockReason);
       return;
     }
@@ -1797,22 +1827,53 @@ function POS({
           {selectedPaymentMethod === PAYMENT_METHODS.card && (
             <div className="space-y-4">
               <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                <p className="font-medium text-blue-800">Cobro automatico por terminal SPIn.</p>
-                <p className="text-sm text-blue-700">Al confirmar, el sistema enviara el monto al POS y esperara la aprobacion real antes de guardar la venta.</p>
+                <p className="font-medium text-blue-800">Pago con tarjeta</p>
+                <p className="text-sm text-blue-700">Selecciona si quieres cobrar con la terminal o registrar el pago manualmente.</p>
               </div>
 
-              <div className={`rounded-lg border p-4 text-sm ${spinConfiguration.isConfigured ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
-                {spinConfigurationMessage}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setCardPaymentMode(CARD_PAYMENT_MODES.terminal)}
+                  className={`rounded-lg border p-4 text-left transition-colors ${
+                    cardPaymentMode === CARD_PAYMENT_MODES.terminal
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-200 bg-white hover:border-blue-300'
+                  }`}
+                >
+                  <p className="font-medium text-gray-900">Pagar por terminal</p>
+                  <p className="text-sm text-gray-600">Envia el cobro a SPIn y espera la aprobacion real.</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCardPaymentMode(CARD_PAYMENT_MODES.manual)}
+                  className={`rounded-lg border p-4 text-left transition-colors ${
+                    cardPaymentMode === CARD_PAYMENT_MODES.manual
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-200 bg-white hover:border-blue-300'
+                  }`}
+                >
+                  <p className="font-medium text-gray-900">Pagar manual</p>
+                  <p className="text-sm text-gray-600">Registra la tarjeta manualmente sin enviarla a la terminal.</p>
+                </button>
               </div>
+
+              {cardPaymentMode === CARD_PAYMENT_MODES.terminal && (
+                <div className={`rounded-lg border p-4 text-sm ${spinConfiguration.isConfigured ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                  {spinConfigurationMessage}
+                </div>
+              )}
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Referencia de la terminal (opcional)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {cardPaymentMode === CARD_PAYMENT_MODES.terminal ? 'Referencia de la terminal (opcional)' : 'Referencia manual (opcional)'}
+                </label>
                 <input
                   type="text"
                   value={paymentReference}
                   onChange={(e) => setPaymentReference(e.target.value)}
                   className="input w-full"
-                  placeholder="Codigo de aprobacion o ultimos 4 digitos"
+                  placeholder={cardPaymentMode === CARD_PAYMENT_MODES.terminal ? 'Codigo de aprobacion o ultimos 4 digitos' : 'Voucher, autorizacion o ultimos 4 digitos'}
                 />
               </div>
 
@@ -1827,9 +1888,13 @@ function POS({
                 <button
                   onClick={handleCardPayment}
                   className="flex-1 btn btn-primary"
-                  disabled={isProcessingPayment || Boolean(checkoutBlockReason) || Boolean(cardPaymentBlockReason)}
+                  disabled={
+                    isProcessingPayment
+                    || Boolean(checkoutBlockReason)
+                    || (cardPaymentMode === CARD_PAYMENT_MODES.terminal && Boolean(cardPaymentBlockReason))
+                  }
                 >
-                  Cobrar en terminal
+                  {cardPaymentMode === CARD_PAYMENT_MODES.terminal ? 'Cobrar en terminal' : 'Confirmar pago manual'}
                 </button>
               </div>
             </div>
@@ -1879,7 +1944,7 @@ function POS({
                 <p className="text-sm text-amber-700">Divide el total entre dos o mas metodos. La suma debe ser exacta.</p>
               </div>
 
-              {splitPayments.some((payment) => payment.method === PAYMENT_METHODS.card) && (
+              {splitPayments.some((payment) => payment.method === PAYMENT_METHODS.card && payment.cardMode === CARD_PAYMENT_MODES.terminal) && (
                 <div className={`rounded-lg border p-4 text-sm ${spinConfiguration.isConfigured ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
                   {spinConfigurationMessage}
                 </div>
@@ -1928,6 +1993,20 @@ function POS({
                         />
                       </div>
                     </div>
+
+                    {payment.method === PAYMENT_METHODS.card && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Modo tarjeta</label>
+                        <select
+                          value={payment.cardMode || CARD_PAYMENT_MODES.terminal}
+                          onChange={(e) => updateSplitPayment(index, 'cardMode', e.target.value)}
+                          className="input w-full"
+                        >
+                          <option value={CARD_PAYMENT_MODES.terminal}>Terminal</option>
+                          <option value={CARD_PAYMENT_MODES.manual}>Manual</option>
+                        </select>
+                      </div>
+                    )}
 
                     {payment.method === PAYMENT_METHODS.cash && (
                       <div>
@@ -1995,7 +2074,14 @@ function POS({
                 <button
                   onClick={handleSplitPayment}
                   className="flex-1 btn btn-primary"
-                  disabled={isProcessingPayment || Boolean(checkoutBlockReason) || (splitPayments.some((payment) => payment.method === PAYMENT_METHODS.card) && Boolean(cardPaymentBlockReason))}
+                  disabled={
+                    isProcessingPayment
+                    || Boolean(checkoutBlockReason)
+                    || (
+                      splitPayments.some((payment) => payment.method === PAYMENT_METHODS.card && payment.cardMode === CARD_PAYMENT_MODES.terminal)
+                      && Boolean(cardPaymentBlockReason)
+                    )
+                  }
                 >
                   Confirmar split
                 </button>
