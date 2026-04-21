@@ -15,7 +15,7 @@ import { subscribeEmployees } from '../services/employeesService';
 import { getPaymentMethodLabel, normalizePaymentMethod } from '../utils/paymentUtils';
 import { getNetSaleTotal, isRefundedSale, isReportableSale } from '../utils/salesUtils';
 import { subscribeSpecialOrderPayments, subscribeSpecialOrders } from '../services/specialOrdersService';
-import { normalizeSpecialOrder, SPECIAL_ORDER_STATUS } from '../utils/specialOrderUtils';
+import { getStandaloneSpecialOrderPaymentNet, normalizeSpecialOrder, SPECIAL_ORDER_STATUS } from '../utils/specialOrderUtils';
 
 function Dashboard() {
   const [sales, setSales] = useState([]);
@@ -66,16 +66,14 @@ function Dashboard() {
     
     const paidSales = sales.filter(isReportableSale);
     const todaySales = paidSales.filter(s => new Date(s.date) >= today);
-    const totalSpecialRevenue = specialOrderPayments.reduce((sum, payment) => (
-      sum + (payment.kind === 'refund' ? -Number(payment.amount || 0) : Number(payment.amount || 0))
-    ), 0);
-    const todaySpecialRevenue = specialOrderPayments
-      .filter((payment) => new Date(payment.createdAt || payment.confirmed_at) >= today)
-      .reduce((sum, payment) => (
-        sum + (payment.kind === 'refund' ? -Number(payment.amount || 0) : Number(payment.amount || 0))
-      ), 0);
-    const totalRevenue = paidSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + totalSpecialRevenue;
-    const todayRevenue = todaySales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + todaySpecialRevenue;
+    const totalStandaloneSpecialRevenue = getStandaloneSpecialOrderPaymentNet(specialOrderPayments, sales);
+    const todayStandaloneSpecialRevenue = getStandaloneSpecialOrderPaymentNet(
+      specialOrderPayments,
+      sales,
+      (payment) => new Date(payment.createdAt || payment.confirmed_at) >= today
+    );
+    const totalRevenue = paidSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + totalStandaloneSpecialRevenue;
+    const todayRevenue = todaySales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + todayStandaloneSpecialRevenue;
     const lowStock = products.filter(p => p.stock <= p.lowStockThreshold);
     const readyOrders = hydratedSpecialOrders.filter((order) => order.orderStatus === SPECIAL_ORDER_STATUS.ready_for_pickup);
     const pendingBalance = hydratedSpecialOrders

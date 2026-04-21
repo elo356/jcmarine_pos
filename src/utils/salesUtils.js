@@ -1,7 +1,91 @@
+import { IVU_MUNICIPAL_RATE, IVU_STATE_RATE, roundMoney } from './cartPricing';
+
 export const SALE_STATUS = {
   paid: 'paid',
   partially_refunded: 'partially_refunded',
   refunded: 'refunded'
+};
+
+const toNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+export const getSaleItemFinancials = (item = {}) => {
+  const quantity = Math.max(0, toNumber(item.quantity, 0));
+  const unitPrice = toNumber(item.price ?? item.unitPrice, 0);
+  const subtotal = roundMoney(item.subtotal ?? (unitPrice * quantity));
+  const discountType = item.discountType === 'fixed' || item.discount?.type === 'fixed' ? 'fixed' : 'percentage';
+  const discountValue = Math.max(0, toNumber(item.discountValue ?? item.discount?.value, 0));
+  const storedDiscountAmount = item.discountAmount;
+  const computedDiscountAmount = discountType === 'percentage'
+    ? subtotal * (discountValue / 100)
+    : discountValue;
+  const discountAmount = roundMoney(Math.min(
+    subtotal,
+    Math.max(0, toNumber(storedDiscountAmount, computedDiscountAmount))
+  ));
+  const taxableSubtotal = roundMoney(
+    item.taxableSubtotal ?? Math.max(0, subtotal - discountAmount)
+  );
+  const stateTax = roundMoney(
+    item.taxBreakdown?.state ??
+    item.stateTax ??
+    ((item.ivuStateEnabled !== false) ? taxableSubtotal * IVU_STATE_RATE : 0)
+  );
+  const municipalTax = roundMoney(
+    item.taxBreakdown?.municipal ??
+    item.municipalTax ??
+    ((item.ivuMunicipalEnabled !== false) ? taxableSubtotal * IVU_MUNICIPAL_RATE : 0)
+  );
+
+  return {
+    ...item,
+    quantity,
+    price: unitPrice,
+    subtotal,
+    discountType,
+    discountValue,
+    discountAmount,
+    taxableSubtotal,
+    taxBreakdown: {
+      state: stateTax,
+      municipal: municipalTax
+    },
+    tax: roundMoney(stateTax + municipalTax),
+    total: roundMoney(item.total ?? (taxableSubtotal + stateTax + municipalTax))
+  };
+};
+
+export const getSaleFinancialSummary = (sale = {}) => {
+  const items = Array.isArray(sale.items) ? sale.items.map(getSaleItemFinancials) : [];
+  const subtotal = roundMoney(
+    sale.subtotal ?? items.reduce((sum, item) => sum + item.subtotal, 0)
+  );
+  const discount = roundMoney(
+    sale.discount ?? items.reduce((sum, item) => sum + item.discountAmount, 0)
+  );
+  const itemStateTax = roundMoney(items.reduce((sum, item) => sum + item.taxBreakdown.state, 0));
+  const itemMunicipalTax = roundMoney(items.reduce((sum, item) => sum + item.taxBreakdown.municipal, 0));
+  const taxBreakdown = {
+    state: roundMoney(sale.taxBreakdown?.state ?? sale.tax_state ?? itemStateTax),
+    municipal: roundMoney(sale.taxBreakdown?.municipal ?? sale.tax_municipal ?? itemMunicipalTax)
+  };
+  const tax = roundMoney(
+    sale.tax ?? sale.taxAmount ?? sale.tax_amount ?? (taxBreakdown.state + taxBreakdown.municipal)
+  );
+  const total = roundMoney(
+    sale.total ?? Math.max(0, subtotal - discount) + tax
+  );
+
+  return {
+    items,
+    subtotal,
+    discount,
+    tax,
+    taxBreakdown,
+    total
+  };
 };
 
 export const normalizeSaleRefund = (refund = {}) => ({
@@ -44,6 +128,8 @@ export const isPartiallyRefundedSale = (sale = {}) =>
   normalizeSaleStatus(sale.status, sale) === SALE_STATUS.partially_refunded;
 
 export const isReportableSale = (sale = {}) => getNetSaleTotal(sale) > 0;
+
+export const isSpecialOrderPaymentSale = (sale = {}) => sale.saleType === 'special_order_payment';
 
 export const getSaleStatusLabel = (status) => {
   switch (status) {

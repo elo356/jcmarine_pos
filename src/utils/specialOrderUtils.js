@@ -1,4 +1,5 @@
 import { calculateItemPricing, roundMoney } from './cartPricing';
+import { normalizePaymentMethod } from './paymentUtils';
 
 export const SPECIAL_ORDER_STATUS = {
   pending_order: 'pending_order',
@@ -21,6 +22,10 @@ export const SPECIAL_ORDER_PAYMENT_KIND = {
   deposit: 'deposit',
   payment: 'payment',
   refund: 'refund'
+};
+
+export const SPECIAL_ORDER_SALE_TYPE = {
+  payment: 'special_order_payment'
 };
 
 export const SPECIAL_ORDER_STATUS_OPTIONS = [
@@ -121,6 +126,7 @@ export const normalizeSpecialOrderPayment = (payment = {}) => ({
   method: payment.method || 'cash',
   amount: Math.round(Number(payment.amount || 0) * 100) / 100,
   processor: payment.processor || null,
+  saleId: payment.saleId || payment.sale_id || '',
   reference: payment.reference || null,
   notes: payment.notes || '',
   confirmedBy: payment.confirmedBy || payment.confirmed_by || '',
@@ -280,6 +286,100 @@ export const canDeliverSpecialOrder = (order) =>
   normalizeSpecialOrderStatus(order.orderStatus) === SPECIAL_ORDER_STATUS.ready_for_pickup &&
   Number(order.balanceDue || 0) <= 0 &&
   order.paymentStatus === SPECIAL_ORDER_PAYMENT_STATUS.paid;
+
+export const isSpecialOrderArchived = (order = {}) =>
+  normalizeSpecialOrderStatus(order.orderStatus) === SPECIAL_ORDER_STATUS.delivered &&
+  Number(order.balanceDue || 0) <= 0;
+
+export const buildSpecialOrderPaymentSaleId = (payment = {}) => {
+  const normalized = normalizeSpecialOrderPayment(payment);
+  return normalized.saleId || `sale_special_order_${normalized.id}`;
+};
+
+export const shouldMirrorSpecialOrderPaymentToSale = (payment = {}) =>
+  normalizeSpecialOrderPayment(payment).kind !== SPECIAL_ORDER_PAYMENT_KIND.refund;
+
+export const buildSpecialOrderPaymentSale = ({ order, payment }) => {
+  const normalizedOrder = normalizeSpecialOrder(order);
+  const normalizedPayment = normalizeSpecialOrderPayment(payment);
+  const saleId = buildSpecialOrderPaymentSaleId(normalizedPayment);
+  const normalizedMethod = normalizePaymentMethod(normalizedPayment.method);
+  const paymentLabel = normalizedPayment.kind === SPECIAL_ORDER_PAYMENT_KIND.deposit ? 'Anticipo' : 'Pago';
+  const amount = roundMoney(normalizedPayment.amount);
+
+  return {
+    id: saleId,
+    transaction_id: saleId,
+    date: normalizedPayment.createdAt,
+    created_at: normalizedPayment.createdAt,
+    saleType: SPECIAL_ORDER_SALE_TYPE.payment,
+    specialOrderId: normalizedOrder.id,
+    specialOrderNumber: normalizedOrder.orderNumber,
+    specialOrderPaymentId: normalizedPayment.id,
+    specialOrderPaymentKind: normalizedPayment.kind,
+    customerName: normalizedOrder.customerName,
+    items: [
+      {
+        id: `item_${normalizedPayment.id}`,
+        productId: '',
+        name: `${paymentLabel} orden especial ${normalizedOrder.orderNumber}`,
+        quantity: 1,
+        unitType: 'unit',
+        price: amount,
+        subtotal: amount,
+        taxableSubtotal: amount,
+        discountAmount: 0,
+        nonInventory: true,
+        isSpecialOrderPayment: true,
+        referenceOrderNumber: normalizedOrder.orderNumber
+      }
+    ],
+    subtotal: amount,
+    tax: 0,
+    taxBreakdown: {
+      state: 0,
+      municipal: 0
+    },
+    discount: 0,
+    total: amount,
+    status: 'paid',
+    paymentStatus: 'paid',
+    paymentMethod: normalizedMethod,
+    payment_method: normalizedMethod,
+    payments: [
+      {
+        ...normalizedPayment,
+        transaction_id: saleId,
+        method: normalizedMethod,
+        amount,
+        confirmed_by: normalizedPayment.confirmedBy || '',
+        confirmed_by_id: normalizedPayment.confirmedById || '',
+        confirmed_at: normalizedPayment.createdAt
+      }
+    ],
+    cashier: normalizedPayment.confirmedBy || normalizedOrder.updatedBy || normalizedOrder.createdBy || 'Sistema',
+    cashierId: normalizedPayment.confirmedById || normalizedOrder.updatedById || normalizedOrder.createdById || 'system'
+  };
+};
+
+export const getStandaloneSpecialOrderPaymentNet = (payments = [], sales = [], predicate = () => true) => {
+  const saleIds = new Set((sales || []).map((sale) => sale.id));
+
+  return (payments || [])
+    .map(normalizeSpecialOrderPayment)
+    .filter((payment) => predicate(payment))
+    .reduce((sum, payment) => {
+      if (payment.kind === SPECIAL_ORDER_PAYMENT_KIND.refund) {
+        return sum - Number(payment.amount || 0);
+      }
+
+      if (saleIds.has(buildSpecialOrderPaymentSaleId(payment))) {
+        return sum;
+      }
+
+      return sum + Number(payment.amount || 0);
+    }, 0);
+};
 
 export const buildSpecialOrderAuditEntry = ({
   entityId,

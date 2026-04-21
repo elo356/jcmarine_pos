@@ -15,10 +15,12 @@ import { refundSale, subscribeSales } from '../services/salesService';
 import { upsertWeeklyCachedSale } from '../services/weeklySalesCacheService';
 import { getPaymentMethodLabel, normalizePaymentMethod } from '../utils/paymentUtils';
 import {
+  getSaleFinancialSummary,
   getNetSaleTotal,
   getSaleRefundTotal,
   getSaleRefunds,
   getSaleStatusLabel,
+  isSpecialOrderPaymentSale,
   isPartiallyRefundedSale,
   isRefundedSale,
   normalizeSaleRefund,
@@ -70,6 +72,10 @@ function Sales() {
     if (filterMethod && normalizePaymentMethod(sale.paymentMethod) !== filterMethod) return false;
     return true;
   }), [filterDate, filterMethod, sales]);
+  const selectedSaleSummary = useMemo(
+    () => (selectedSale ? getSaleFinancialSummary(selectedSale) : null),
+    [selectedSale]
+  );
 
   const getReceiptNumber = (saleId = '') => {
     if (!saleId) return 'N/A';
@@ -274,6 +280,7 @@ function Sales() {
                 const refundTotal = getSaleRefundTotal(sale);
                 const netTotal = getNetSaleTotal(sale);
                 const saleStatus = normalizeSaleStatus(sale.status, sale);
+                const isSpecialPayment = isSpecialOrderPaymentSale(sale);
 
                 return (
                   <tr key={sale.id} className="hover:bg-gray-50">
@@ -286,6 +293,11 @@ function Sales() {
                     <td>{formatDate(sale.date)}</td>
                     <td>
                       <div className="space-y-1">
+                        {isSpecialPayment && (
+                          <div className="text-xs font-semibold text-indigo-600">
+                            Orden especial {sale.specialOrderNumber} {sale.customerName ? `• ${sale.customerName}` : ''}
+                          </div>
+                        )}
                         {(sale.items || []).slice(0, 3).map((item, index) => (
                           <div
                             key={`${sale.id}_${item.productId || index}`}
@@ -342,13 +354,19 @@ function Sales() {
                         </button>
                         <button
                           onClick={() => openRefundModal(sale)}
-                          disabled={isRefundedSale(sale)}
+                          disabled={isRefundedSale(sale) || isSpecialPayment}
                           className={`inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg ${
-                            isRefundedSale(sale)
+                            isRefundedSale(sale) || isSpecialPayment
                               ? 'text-gray-300 cursor-not-allowed'
                               : 'text-red-700 hover:bg-red-50'
                           }`}
-                          title={isRefundedSale(sale) ? 'Venta ya reembolsada por completo' : 'Registrar reembolso parcial o total'}
+                          title={
+                            isSpecialPayment
+                              ? 'Los reembolsos de órdenes especiales se manejan desde Pedidos especiales'
+                              : isRefundedSale(sale)
+                                ? 'Venta ya reembolsada por completo'
+                                : 'Registrar reembolso parcial o total'
+                          }
                         >
                           <RotateCcw size={18} />
                           Refund
@@ -389,14 +407,26 @@ function Sales() {
                   )}
                   <div className="flex justify-between"><span>Método</span><strong>{getPaymentMethodLabel(selectedSale.paymentMethod)}</strong></div>
                   <div className="flex justify-between"><span>Estado</span><strong>{getSaleStatusLabel(normalizeSaleStatus(selectedSale.status, selectedSale))}</strong></div>
+                  {isSpecialOrderPaymentSale(selectedSale) && (
+                    <div className="flex justify-between"><span>Origen</span><strong>Orden especial {selectedSale.specialOrderNumber || '-'}</strong></div>
+                  )}
                 </div>
               </div>
               <div className="card p-4">
                 <h3 className="font-semibold mb-3">Totales</h3>
                 <div className="space-y-2 text-sm">
-                  <div className="flex justify-between"><span>Subtotal</span><strong>{formatCurrency(selectedSale.subtotal || 0)}</strong></div>
-                  <div className="flex justify-between"><span>IVU</span><strong>{formatCurrency(selectedSale.tax || 0)}</strong></div>
-                  <div className="flex justify-between"><span>Total</span><strong>{formatCurrency(selectedSale.total || 0)}</strong></div>
+                  <div className="flex justify-between"><span>Subtotal</span><strong>{formatCurrency(selectedSaleSummary?.subtotal || 0)}</strong></div>
+                  {(selectedSaleSummary?.discount || 0) > 0 && (
+                    <div className="flex justify-between text-green-600"><span>Descuento</span><strong>-{formatCurrency(selectedSaleSummary?.discount || 0)}</strong></div>
+                  )}
+                  {(selectedSaleSummary?.taxBreakdown?.state || 0) > 0 && (
+                    <div className="flex justify-between"><span>IVU estatal</span><strong>{formatCurrency(selectedSaleSummary?.taxBreakdown?.state || 0)}</strong></div>
+                  )}
+                  {(selectedSaleSummary?.taxBreakdown?.municipal || 0) > 0 && (
+                    <div className="flex justify-between"><span>IVU municipal</span><strong>{formatCurrency(selectedSaleSummary?.taxBreakdown?.municipal || 0)}</strong></div>
+                  )}
+                  <div className="flex justify-between"><span>IVU</span><strong>{formatCurrency(selectedSaleSummary?.tax || 0)}</strong></div>
+                  <div className="flex justify-between"><span>Total</span><strong>{formatCurrency(selectedSaleSummary?.total || 0)}</strong></div>
                   <div className="flex justify-between"><span>Refunds</span><strong className="text-red-600">-{formatCurrency(getSaleRefundTotal(selectedSale))}</strong></div>
                   <div className="flex justify-between"><span>Neto</span><strong className="text-emerald-700">{formatCurrency(getNetSaleTotal(selectedSale))}</strong></div>
                 </div>
@@ -410,7 +440,7 @@ function Sales() {
                   </button>
                   <button
                     className="btn btn-secondary"
-                    disabled={isRefundedSale(selectedSale)}
+                    disabled={isRefundedSale(selectedSale) || isSpecialOrderPaymentSale(selectedSale)}
                     onClick={() => openRefundModal(selectedSale)}
                   >
                     Registrar refund
@@ -432,9 +462,16 @@ function Sales() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(selectedSale.items || []).map((item, index) => (
+                    {(selectedSaleSummary?.items || selectedSale.items || []).map((item, index) => (
                       <tr key={`${selectedSale.id}_item_${index}`}>
-                        <td>{item.name}</td>
+                        <td>
+                          <div>{item.name}</div>
+                          {item.discountAmount > 0 && (
+                            <div className="text-xs text-green-600">
+                              Desc. {item.discountType === 'percentage' ? `${item.discountValue}%` : formatCurrency(item.discountValue)} -{formatCurrency(item.discountAmount)}
+                            </div>
+                          )}
+                        </td>
                         <td>{formatQuantity(item.quantity, item.unitType || 'unit')}</td>
                         <td>{formatCurrency(item.price || 0)}</td>
                         <td>{formatCurrency(item.taxableSubtotal || item.subtotal || 0)}</td>

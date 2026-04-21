@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ClipboardList, DollarSign, PackageCheck, Plus, Search, XCircle } from 'lucide-react';
 import { formatCurrency, generateId, loadData, saveData } from '../data/demoData';
 import Notification from '../components/Notification';
@@ -15,18 +15,21 @@ import { subscribeProducts } from '../services/inventoryService';
 import {
   applySpecialOrderPayment,
   saveSpecialOrder,
-  saveSpecialOrderPayment,
   saveSpecialOrderWithPayments,
+  syncSpecialOrderPaymentArtifacts,
   subscribeSpecialOrderPayments,
   subscribeSpecialOrders
 } from '../services/specialOrdersService';
 import { buildPaymentEntry } from '../utils/paymentUtils';
 import {
+  buildSpecialOrderPaymentSale,
   buildSpecialOrderAuditEntry,
+  buildSpecialOrderPaymentSaleId,
   canDeliverSpecialOrder,
   calculateSpecialOrderPaymentSummary,
   formatSpecialOrderNumber,
   getSpecialOrderStatusLabel,
+  isSpecialOrderArchived,
   normalizeSpecialOrder,
   SPECIAL_ORDER_PAYMENT_KIND,
   SPECIAL_ORDER_STATUS
@@ -59,6 +62,7 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
   const [selectedTab, setSelectedTab] = useState('all');
   const [filterDate, setFilterDate] = useState('');
   const [showBalanceOnly, setShowBalanceOnly] = useState(false);
+  const [showArchivedHistory, setShowArchivedHistory] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
   const [detailOrder, setDetailOrder] = useState(null);
@@ -127,37 +131,46 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     [rawOrders, payments]
   );
 
-  const filteredOrders = useMemo(() => {
+  const matchesOrderFilters = useCallback((order, includeArchived = false) => {
     const query = searchQuery.trim().toLowerCase();
-    return hydratedOrders.filter((order) => {
-      const matchesQuery = !query || [
-        order.orderNumber,
-        order.customerName,
-        order.customerPhone,
-        ...order.items.map((item) => `${item.name} ${item.sku} ${item.description}`)
-      ].join(' ').toLowerCase().includes(query);
+    const matchesQuery = !query || [
+      order.orderNumber,
+      order.customerName,
+      order.customerPhone,
+      ...order.items.map((item) => `${item.name} ${item.sku} ${item.description}`)
+    ].join(' ').toLowerCase().includes(query);
 
-      const matchesTab = (() => {
-        switch (selectedTab) {
-          case 'pending':
-            return [SPECIAL_ORDER_STATUS.pending_order, SPECIAL_ORDER_STATUS.ordered, SPECIAL_ORDER_STATUS.waiting_arrival].includes(order.orderStatus);
-          case 'ready':
-            return order.orderStatus === SPECIAL_ORDER_STATUS.ready_for_pickup;
-          case 'delivered':
-            return order.orderStatus === SPECIAL_ORDER_STATUS.delivered;
-          case 'canceled':
-            return order.orderStatus === SPECIAL_ORDER_STATUS.canceled;
-          default:
-            return true;
-        }
-      })();
+    const matchesTab = (() => {
+      switch (selectedTab) {
+        case 'pending':
+          return [SPECIAL_ORDER_STATUS.pending_order, SPECIAL_ORDER_STATUS.ordered, SPECIAL_ORDER_STATUS.waiting_arrival].includes(order.orderStatus);
+        case 'ready':
+          return order.orderStatus === SPECIAL_ORDER_STATUS.ready_for_pickup;
+        case 'delivered':
+          return order.orderStatus === SPECIAL_ORDER_STATUS.delivered;
+        case 'canceled':
+          return order.orderStatus === SPECIAL_ORDER_STATUS.canceled;
+        default:
+          return true;
+      }
+    })();
 
-      const matchesDate = !filterDate || String(order.createdAt || '').startsWith(filterDate) || String(order.expectedDate || '').startsWith(filterDate);
-      const matchesBalance = !showBalanceOnly || Number(order.balanceDue || 0) > 0;
+    const matchesDate = !filterDate || String(order.createdAt || '').startsWith(filterDate) || String(order.expectedDate || '').startsWith(filterDate);
+    const matchesBalance = !showBalanceOnly || Number(order.balanceDue || 0) > 0;
+    const archived = isSpecialOrderArchived(order);
 
-      return matchesQuery && matchesTab && matchesDate && matchesBalance;
-    });
-  }, [filterDate, hydratedOrders, searchQuery, selectedTab, showBalanceOnly]);
+    return matchesQuery && matchesTab && matchesDate && matchesBalance && (includeArchived ? archived : !archived);
+  }, [filterDate, searchQuery, selectedTab, showBalanceOnly]);
+
+  const filteredOrders = useMemo(
+    () => hydratedOrders.filter((order) => matchesOrderFilters(order, false)),
+    [hydratedOrders, matchesOrderFilters]
+  );
+
+  const archivedOrders = useMemo(
+    () => hydratedOrders.filter((order) => matchesOrderFilters(order, true)),
+    [hydratedOrders, matchesOrderFilters]
+  );
 
   const metrics = useMemo(() => {
     const reportable = hydratedOrders.filter((order) => order.orderStatus !== SPECIAL_ORDER_STATUS.canceled);
@@ -213,14 +226,23 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     });
   };
 
-  const updateLocalState = ({ nextOrders, nextPayments, nextCustomers, nextAuditLogs }) => {
+  const updateLocalState = ({
+    nextOrders,
+    nextPayments,
+    nextCustomers,
+    nextAuditLogs,
+    nextSales,
+    nextRegisterPayments
+  }) => {
     const current = loadData();
     const updated = {
       ...current,
       specialOrders: nextOrders ?? current.specialOrders ?? [],
       specialOrderPayments: nextPayments ?? current.specialOrderPayments ?? [],
       customers: nextCustomers ?? current.customers ?? [],
-      auditLogs: nextAuditLogs ?? current.auditLogs ?? []
+      auditLogs: nextAuditLogs ?? current.auditLogs ?? [],
+      sales: nextSales ?? current.sales ?? [],
+      payments: nextRegisterPayments ?? current.payments ?? []
     };
     saveData(updated);
     if (nextOrders) setRawOrders(nextOrders);
@@ -228,6 +250,68 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     if (nextCustomers) setCustomers(nextCustomers);
     if (nextAuditLogs) setAuditLogs(nextAuditLogs);
   };
+
+  const appendMirroredPaymentArtifacts = (currentData, order, payment) => {
+    const nextRegisterPayments = [payment, ...(currentData.payments || []).filter((entry) => entry.id !== payment.id)];
+
+    if (payment.kind === SPECIAL_ORDER_PAYMENT_KIND.refund) {
+      return {
+        nextSales: currentData.sales || [],
+        nextRegisterPayments
+      };
+    }
+
+    const mirroredSale = buildSpecialOrderPaymentSale({ order, payment });
+    const nextSales = [mirroredSale, ...(currentData.sales || []).filter((sale) => sale.id !== mirroredSale.id)];
+
+    return {
+      nextSales,
+      nextRegisterPayments
+    };
+  };
+
+  useEffect(() => {
+    if (hydratedOrders.length === 0 || payments.length === 0) return;
+
+    const currentData = loadData();
+    const currentSales = currentData.sales || [];
+    const currentRegisterPayments = currentData.payments || [];
+    const salesById = new Set(currentSales.map((sale) => sale.id));
+    const missingMirrors = payments.filter((payment) => (
+      payment.kind !== SPECIAL_ORDER_PAYMENT_KIND.refund &&
+      !salesById.has(buildSpecialOrderPaymentSaleId(payment))
+    ));
+
+    if (missingMirrors.length === 0) {
+      return;
+    }
+
+    const mirroredSales = [];
+    const mirroredRegisterPayments = [...currentRegisterPayments];
+
+    missingMirrors.forEach((payment) => {
+      const order = hydratedOrders.find((entry) => entry.id === payment.specialOrderId);
+      if (!order) return;
+
+      const mirroredSale = buildSpecialOrderPaymentSale({ order, payment });
+      mirroredSales.push(mirroredSale);
+
+      if (!mirroredRegisterPayments.some((entry) => entry.id === payment.id)) {
+        mirroredRegisterPayments.unshift(payment);
+      }
+
+      syncSpecialOrderPaymentArtifacts({ order, payment }).catch((error) => {
+        console.error('Error syncing legacy special order payment to sales:', error);
+      });
+    });
+
+    if (mirroredSales.length === 0) return;
+
+    updateLocalState({
+      nextSales: [...mirroredSales, ...currentSales.filter((sale) => !mirroredSales.some((entry) => entry.id === sale.id))],
+      nextRegisterPayments: mirroredRegisterPayments
+    });
+  }, [hydratedOrders, payments]);
 
   const createOrReuseCustomer = async (customerPayload) => {
     const existing = customers.find((customer) =>
@@ -379,16 +463,25 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
         }));
       }
 
+      const currentData = loadData();
       const nextCustomers = [savedCustomer, ...customers.filter((entry) => entry.id !== savedCustomer.id)];
       const nextOrders = [newOrder, ...rawOrders];
       const nextPayments = depositPayment ? [depositPayment, ...payments] : payments;
       const nextAuditLogs = [...auditEntries, ...auditLogs];
+      const mirroredArtifacts = depositPayment
+        ? appendMirroredPaymentArtifacts(currentData, newOrder, depositPayment)
+        : {
+            nextSales: currentData.sales || [],
+            nextRegisterPayments: currentData.payments || []
+          };
 
       updateLocalState({
         nextCustomers,
         nextOrders,
         nextPayments,
-        nextAuditLogs
+        nextAuditLogs,
+        nextSales: mirroredArtifacts.nextSales,
+        nextRegisterPayments: mirroredArtifacts.nextRegisterPayments
       });
 
       await saveSpecialOrderWithPayments({
@@ -551,6 +644,7 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
       ...order,
       payments: [...(order.payments || []), payment]
     });
+    const currentData = loadData();
     const nextRawOrders = rawOrders.map((entry) => entry.id === order.id ? nextOrder : entry);
     const nextPayments = [payment, ...payments];
     const auditEntry = buildSpecialOrderAuditEntry({
@@ -568,11 +662,14 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
       }
     });
     const nextAuditLogs = [auditEntry, ...auditLogs];
+    const mirroredArtifacts = appendMirroredPaymentArtifacts(currentData, nextOrder, payment);
 
     updateLocalState({
       nextOrders: nextRawOrders,
       nextPayments,
-      nextAuditLogs
+      nextAuditLogs,
+      nextSales: mirroredArtifacts.nextSales,
+      nextRegisterPayments: mirroredArtifacts.nextRegisterPayments
     });
 
     try {
@@ -605,8 +702,11 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
       updatedBy: currentUser.name,
       updatedById: currentUser.id
     });
+    const currentData = loadData();
     const nextPayments = [...payments];
     const nextAuditLogs = [...auditLogs];
+    let nextSales = currentData.sales || [];
+    let nextRegisterPayments = currentData.payments || [];
 
     if (refundAmount > 0) {
       const refundPayment = {
@@ -627,6 +727,9 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
         payments: [...(order.payments || []), refundPayment]
       });
       nextPayments.unshift(refundPayment);
+      const mirroredArtifacts = appendMirroredPaymentArtifacts(currentData, updatedOrder, refundPayment);
+      nextSales = mirroredArtifacts.nextSales;
+      nextRegisterPayments = mirroredArtifacts.nextRegisterPayments;
       nextAuditLogs.unshift(buildSpecialOrderAuditEntry({
         entityId: order.id,
         action: 'refund_registered',
@@ -654,13 +757,18 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     updateLocalState({
       nextOrders: rawOrders.map((entry) => entry.id === order.id ? updatedOrder : entry),
       nextPayments,
-      nextAuditLogs
+      nextAuditLogs,
+      nextSales,
+      nextRegisterPayments
     });
 
     try {
       await saveSpecialOrder(updatedOrder);
       if (refundAmount > 0) {
-        await saveSpecialOrderPayment(nextPayments[0]);
+        await syncSpecialOrderPaymentArtifacts({
+          order: updatedOrder,
+          payment: nextPayments[0]
+        });
       }
       await Promise.all(nextAuditLogs.slice(0, refundAmount > 0 ? 2 : 1).map((log) => saveAuditLog(log)));
       showNotification('success', 'Pedido cancelado correctamente.');
@@ -790,6 +898,13 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
               />
               Solo con balance pendiente
             </label>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowArchivedHistory((value) => !value)}
+            >
+              {showArchivedHistory ? 'Ocultar historial vendido' : `Ver historial vendido (${archivedOrders.length})`}
+            </button>
           </div>
         </div>
 
@@ -818,6 +933,40 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
           </div>
         )}
       </div>
+
+      {showArchivedHistory && (
+        <div className="card p-6 space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Historial oculto de ventas especiales</h2>
+            <p className="text-sm text-gray-500">Aquí aparecen los pedidos especiales ya cobrados y entregados.</p>
+          </div>
+
+          {archivedOrders.length > 0 ? (
+            <SpecialOrdersTable
+              orders={archivedOrders}
+              onView={setDetailOrder}
+              onRegisterPayment={(order) => setPaymentModalState({ open: true, order, mode: 'payment' })}
+              onMarkReady={(order) => commitStatusChange({
+                order,
+                nextStatus: SPECIAL_ORDER_STATUS.ready_for_pickup,
+                description: `Pedido marcado como listo para recoger.`,
+                patch: {
+                  receivedAt: order.receivedAt || new Date().toISOString(),
+                  readyAt: new Date().toISOString()
+                }
+              })}
+              onDeliver={markOrderAsDelivered}
+              onUndoDelivered={undoDeliveredOrder}
+              onCancel={setCancellationOrder}
+            />
+          ) : (
+            <div className="py-10 text-center text-gray-400">
+              <ClipboardList size={40} className="mx-auto mb-3" />
+              <p>No hay ventas especiales archivadas para este filtro.</p>
+            </div>
+          )}
+        </div>
+      )}
 
       <SpecialOrderForm
         isOpen={showCreateModal}

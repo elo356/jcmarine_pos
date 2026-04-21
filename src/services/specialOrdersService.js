@@ -1,11 +1,15 @@
 import { collection, doc, onSnapshot, orderBy, query, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { saveAuditLog } from './auditLogService';
+import { savePayment } from './paymentService';
+import { saveSale } from './salesService';
 import {
+  buildSpecialOrderPaymentSale,
   buildSpecialOrderAuditEntry,
   calculateSpecialOrderPaymentSummary,
   normalizeSpecialOrder,
-  normalizeSpecialOrderPayment
+  normalizeSpecialOrderPayment,
+  shouldMirrorSpecialOrderPaymentToSale
 } from '../utils/specialOrderUtils';
 
 const specialOrdersCol = collection(db, 'specialOrders');
@@ -45,13 +49,42 @@ export const saveSpecialOrderPayment = async (payment) => {
   return normalized;
 };
 
+export const syncSpecialOrderPaymentArtifacts = async ({ order, payment }) => {
+  const normalizedOrder = normalizeSpecialOrder(order);
+  const normalizedPayment = normalizeSpecialOrderPayment(payment);
+
+  await saveSpecialOrderPayment(normalizedPayment);
+  await savePayment(normalizedPayment);
+
+  if (!shouldMirrorSpecialOrderPaymentToSale(normalizedPayment)) {
+    return {
+      payment: normalizedPayment,
+      sale: null
+    };
+  }
+
+  const mirroredSale = buildSpecialOrderPaymentSale({
+    order: normalizedOrder,
+    payment: normalizedPayment
+  });
+  await saveSale(mirroredSale);
+
+  return {
+    payment: normalizedPayment,
+    sale: mirroredSale
+  };
+};
+
 export const saveSpecialOrderWithPayments = async ({
   order,
   payments = [],
   auditLogs = []
 }) => {
   const normalizedOrder = await saveSpecialOrder(order);
-  await Promise.all(payments.map((payment) => saveSpecialOrderPayment(payment)));
+  await Promise.all(payments.map((payment) => syncSpecialOrderPaymentArtifacts({
+    order: normalizedOrder,
+    payment
+  })));
   await Promise.all(auditLogs.map((log) => saveAuditLog(log)));
   return normalizedOrder;
 };
@@ -94,7 +127,10 @@ export const applySpecialOrderPayment = async ({
   });
 
   await saveSpecialOrder(nextOrder);
-  await saveSpecialOrderPayment(normalizedPayment);
+  await syncSpecialOrderPaymentArtifacts({
+    order: nextOrder,
+    payment: normalizedPayment
+  });
   await saveAuditLog(auditLog);
 
   return nextOrder;

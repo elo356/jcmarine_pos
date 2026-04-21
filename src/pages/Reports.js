@@ -8,7 +8,6 @@ import { normalizePaymentMethod } from '../utils/paymentUtils';
 import { getNetSaleTotal, isReportableSale } from '../utils/salesUtils';
 import { subscribeSpecialOrderPayments, subscribeSpecialOrders } from '../services/specialOrdersService';
 import { normalizeSpecialOrder, SPECIAL_ORDER_STATUS } from '../utils/specialOrderUtils';
-import { printHtmlDocument } from '../services/printService';
 
 const Reports = () => {
   const [sales, setSales] = useState([]);
@@ -113,23 +112,33 @@ const Reports = () => {
     const filteredSales = getDateRangeSales();
     const start = parseLocalDate(startDate, false);
     const end = parseLocalDate(endDate, true);
-    const filteredSpecialPayments = specialOrderPayments
-      .filter((payment) => {
+    const standaloneTransactions = specialOrderPayments.filter((payment) => {
+      const paymentDate = new Date(payment.createdAt || payment.confirmed_at);
+      return Boolean(
+        start &&
+        end &&
+        paymentDate >= start &&
+        paymentDate <= end &&
+        !sales.some((sale) => sale.id === `sale_special_order_${payment.id}`)
+      );
+    });
+    const specialRevenue = getStandaloneSpecialOrderPaymentNet(
+      specialOrderPayments,
+      sales,
+      (payment) => {
         const paymentDate = new Date(payment.createdAt || payment.confirmed_at);
-        return start && end && paymentDate >= start && paymentDate <= end;
-      });
-    
-    const specialRevenue = filteredSpecialPayments.reduce((sum, payment) => (
-      sum + (payment.kind === 'refund' ? -Number(payment.amount || 0) : Number(payment.amount || 0))
-    ), 0);
+        return Boolean(start && end && paymentDate >= start && paymentDate <= end);
+      }
+    );
     const totalRevenue = filteredSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + specialRevenue;
     const totalItems = filteredSales.reduce((sum, sale) => 
-      sum + sale.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0
+      sum + sale.items.reduce((itemSum, item) => itemSum + (item.nonInventory ? 0 : item.quantity), 0), 0
     );
-    const totalTransactions = filteredSales.length + filteredSpecialPayments.length;
+    const totalTransactions = filteredSales.length + standaloneTransactions.length;
     const avgTransaction = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
     const totalProfit = filteredSales.reduce((sum, sale) => {
       return sum + sale.items.reduce((itemSum, item) => {
+        if (!item.productId || item.nonInventory) return itemSum;
         const product = products.find(p => p.id === item.productId);
         const cost = product ? product.cost : 0;
         return itemSum + ((item.price - cost) * item.quantity);
@@ -151,6 +160,7 @@ const Reports = () => {
 
     filteredSales.forEach(sale => {
       sale.items.forEach(item => {
+        if (!item.productId || item.nonInventory) return;
         const product = products.find(p => p.id === item.productId);
         if (product) {
           if (!categorySales[product.category]) {
@@ -172,6 +182,8 @@ const Reports = () => {
 
   const getSalesByPaymentMethod = () => {
     const filteredSales = getDateRangeSales();
+    const start = parseLocalDate(startDate, false);
+    const end = parseLocalDate(endDate, true);
     const methodSales = {
       cash: 0,
       card: 0,
@@ -197,6 +209,23 @@ const Reports = () => {
       }
     });
 
+    Object.keys(methodSales).forEach((method) => {
+      methodSales[method] += getStandaloneSpecialOrderPaymentNet(
+        specialOrderPayments,
+        sales,
+        (payment) => {
+          const paymentDate = new Date(payment.createdAt || payment.confirmed_at);
+          return Boolean(
+            start &&
+            end &&
+            paymentDate >= start &&
+            paymentDate <= end &&
+            normalizePaymentMethod(payment.method) === method
+          );
+        }
+      );
+    });
+
     return methodSales;
   };
 
@@ -206,6 +235,7 @@ const Reports = () => {
 
     filteredSales.forEach(sale => {
       sale.items.forEach(item => {
+        if (!item.productId || item.nonInventory) return;
         if (!productSales[item.productId]) {
           productSales[item.productId] = { 
             name: item.name, 

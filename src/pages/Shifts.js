@@ -7,10 +7,12 @@ import Notification from '../components/Notification';
 import { useAuth } from '../contexts/AuthContext';
 import { subscribeEmployees } from '../services/employeesService';
 import { subscribeSales } from '../services/salesService';
+import { subscribeSpecialOrderPayments } from '../services/specialOrdersService';
 import { createShift, patchShift, subscribeShifts } from '../services/shiftsService';
 import { getNetSaleTotal, isReportableSale } from '../utils/salesUtils';
+import { getStandaloneSpecialOrderPaymentNet } from '../utils/specialOrderUtils';
 
-const calculateShiftTotals = (shift, sales, options = {}) => {
+const calculateShiftTotals = (shift, sales, specialOrderPayments = [], options = {}) => {
   const startValue = options.startTime ?? shift.startTime;
   const endValue = options.endTime ?? shift.endTime;
   const breakMinutes = Number(options.totalBreakTime ?? shift.totalBreakTime ?? 0);
@@ -35,7 +37,15 @@ const calculateShiftTotals = (shift, sales, options = {}) => {
 
     return sale.cashierId === shift.employeeId;
   });
-  const totalSales = shiftSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0);
+  const standaloneSpecialRevenue = getStandaloneSpecialOrderPaymentNet(
+    specialOrderPayments,
+    sales,
+    (payment) => {
+      const paymentDate = new Date(payment.createdAt || payment.confirmed_at);
+      return paymentDate >= startTime && paymentDate <= endTime;
+    }
+  );
+  const totalSales = shiftSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + standaloneSpecialRevenue;
 
   return {
     totalHours: Math.max(0, totalHours),
@@ -48,6 +58,7 @@ const Shifts = () => {
   const isCashier = profile?.role === 'cashier';
   const [shifts, setShifts] = useState([]);
   const [sales, setSales] = useState([]);
+  const [specialOrderPayments, setSpecialOrderPayments] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [activeShift, setActiveShift] = useState(null);
   const [showClockInModal, setShowClockInModal] = useState(false);
@@ -94,6 +105,7 @@ const Shifts = () => {
     setEmployees(data.employees || []);
     setShifts(data.shifts || []);
     setSales(data.sales || []);
+    setSpecialOrderPayments(data.specialOrderPayments || []);
 
     const unsubEmployees = isCashier
       ? () => {}
@@ -109,11 +121,16 @@ const Shifts = () => {
       (rows) => setSales(rows),
       (error) => console.error('Error subscribing sales in shifts:', error)
     );
+    const unsubSpecialPayments = subscribeSpecialOrderPayments(
+      (rows) => setSpecialOrderPayments(rows),
+      (error) => console.error('Error subscribing special order payments in shifts:', error)
+    );
 
     return () => {
       unsubEmployees();
       unsubShifts();
       unsubSales();
+      unsubSpecialPayments();
     };
   }, [isCashier]);
 
@@ -212,7 +229,11 @@ const Shifts = () => {
     if (!targetShift) return;
 
     const endTime = new Date();
+<<<<<<< HEAD
     const { totalHours, totalSales } = calculateShiftTotals(targetShift, sales, {
+=======
+    const { totalHours, totalSales } = calculateShiftTotals(activeShift, sales, specialOrderPayments, {
+>>>>>>> cb02b53b2039d9378068e830f050d9bd87721d1f
       endTime: endTime.toISOString()
     });
 
@@ -316,7 +337,7 @@ const Shifts = () => {
   };
 
   const getRunningNetHours = (shift) => {
-    const { totalHours } = calculateShiftTotals(shift, sales);
+    const { totalHours } = calculateShiftTotals(shift, sales, specialOrderPayments);
     return `${totalHours.toFixed(2)}h`;
   };
 
@@ -478,7 +499,7 @@ const Shifts = () => {
                 </tr>
               ) : (
                 filteredShifts.map((shift) => {
-                  const liveTotals = shift.endTime ? null : calculateShiftTotals(shift, sales);
+                  const liveTotals = shift.endTime ? null : calculateShiftTotals(shift, sales, specialOrderPayments);
                   const salesAmount = shift.endTime ? Number(shift.totalSales || 0) : liveTotals.totalSales;
 
                   return (

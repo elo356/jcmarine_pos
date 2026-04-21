@@ -10,10 +10,16 @@ import { subscribeSales } from '../services/salesService';
 import { subscribeShifts } from '../services/shiftsService';
 import { verifyFirestoreAvailability } from '../services/firestoreHealthService';
 import { createStoreStatusLog, subscribeStoreStatusLogs } from '../services/storeStatusLogService';
+<<<<<<< HEAD
 import { saveWeeklyShiftClosure, subscribeWeeklyShiftClosures } from '../services/weeklyShiftClosureService';
 import { PAYMENT_METHODS } from '../utils/paymentUtils';
+=======
+import { subscribeSpecialOrderPayments } from '../services/specialOrdersService';
+import { normalizePaymentMethod, PAYMENT_METHODS } from '../utils/paymentUtils';
+>>>>>>> cb02b53b2039d9378068e830f050d9bd87721d1f
 import { buildStoreClosurePrintHtml } from '../utils/printTemplates';
 import { getNetSaleTotal, getSaleRefundTotal, isReportableSale } from '../utils/salesUtils';
+import { getStandaloneSpecialOrderPaymentNet } from '../utils/specialOrderUtils';
 import { printHtmlDocument } from '../services/printService';
 import {
   buildWeeklyShiftClosureRecord,
@@ -60,7 +66,11 @@ const StorePage = () => {
   const { user, profile } = useAuth();
   const [employees, setEmployees] = useState([]);
   const [sales, setSales] = useState([]);
+<<<<<<< HEAD
   const [shifts, setShifts] = useState([]);
+=======
+  const [specialOrderPayments, setSpecialOrderPayments] = useState([]);
+>>>>>>> cb02b53b2039d9378068e830f050d9bd87721d1f
   const [storeStatusLogs, setStoreStatusLogs] = useState([]);
   const [weeklyShiftClosures, setWeeklyShiftClosures] = useState([]);
   const [showOpenModal, setShowOpenModal] = useState(false);
@@ -103,6 +113,7 @@ const StorePage = () => {
     const data = loadData();
     setEmployees(data.employees || []);
     setSales(data.sales || []);
+    setSpecialOrderPayments(data.specialOrderPayments || []);
 
     const unsubEmployees = subscribeEmployees(
       (rows) => setEmployees(rows),
@@ -120,9 +131,15 @@ const StorePage = () => {
       (rows) => setStoreStatusLogs(rows),
       (error) => console.error('Error subscribing store status logs in store page:', error)
     );
+<<<<<<< HEAD
     const unsubWeeklyShiftClosures = subscribeWeeklyShiftClosures(
       (rows) => setWeeklyShiftClosures(rows),
       (error) => console.error('Error subscribing weekly shift closures in store page:', error)
+=======
+    const unsubSpecialPayments = subscribeSpecialOrderPayments(
+      (rows) => setSpecialOrderPayments(rows),
+      (error) => console.error('Error subscribing special order payments in store page:', error)
+>>>>>>> cb02b53b2039d9378068e830f050d9bd87721d1f
     );
 
     return () => {
@@ -130,7 +147,11 @@ const StorePage = () => {
       unsubSales();
       unsubShifts();
       unsubStoreStatusLogs();
+<<<<<<< HEAD
       unsubWeeklyShiftClosures();
+=======
+      unsubSpecialPayments();
+>>>>>>> cb02b53b2039d9378068e830f050d9bd87721d1f
     };
   }, []);
 
@@ -188,26 +209,39 @@ const StorePage = () => {
   const closeSummary = useMemo(() => {
     if (!activeStoreSession) return null;
 
+    const openedAtMs = new Date(activeStoreSession.createdAt).getTime();
     const paidSales = activeSessionSales.filter(isReportableSale);
+    const standalonePayments = (specialOrderPayments || []).filter((payment) => {
+      const paymentTime = new Date(payment.createdAt || payment.confirmed_at).getTime();
+      return paymentTime >= openedAtMs;
+    });
+    const activeStandaloneSpecialRevenue = roundMoney(getStandaloneSpecialOrderPaymentNet(
+      standalonePayments,
+      sales,
+      () => true
+    ));
     const grossSales = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.subtotal || 0), 0));
     const discounts = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.discount || 0), 0));
     const refunds = roundMoney(activeSessionSales.reduce((sum, sale) => sum + getSaleRefundTotal(sale), 0));
     const taxes = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.tax || 0), 0));
-    const totalTendered = roundMoney(paidSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0));
+    const totalTendered = roundMoney(paidSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + activeStandaloneSpecialRevenue);
     const cashPayments = roundMoney(
       paidSales
         .filter((sale) => sale.paymentMethod === PAYMENT_METHODS.cash)
-        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0)
+        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) +
+      getStandaloneSpecialOrderPaymentNet(standalonePayments, sales, (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.cash)
     );
     const athMovilPayments = roundMoney(
       paidSales
         .filter((sale) => sale.paymentMethod === PAYMENT_METHODS.athMovil)
-        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0)
+        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) +
+      getStandaloneSpecialOrderPaymentNet(standalonePayments, sales, (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.athMovil)
     );
     const cardPayments = roundMoney(
       paidSales
         .filter((sale) => sale.paymentMethod === PAYMENT_METHODS.card)
-        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0)
+        .reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) +
+      getStandaloneSpecialOrderPaymentNet(standalonePayments, sales, (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.card)
     );
     const cashRefunds = roundMoney(
       activeSessionSales
@@ -247,7 +281,7 @@ const StorePage = () => {
         card: cardPayments
       }
     };
-  }, [activeSessionSales, activeStoreSession, closeForm.actualCashAmount, closeForm.paidIn, closeForm.paidOut, currentEmployee?.name, profile?.name, user?.email]);
+  }, [activeSessionSales, activeStoreSession, closeForm.actualCashAmount, closeForm.paidIn, closeForm.paidOut, currentEmployee?.name, profile?.name, sales, specialOrderPayments, user?.email]);
 
   const historyRows = useMemo(() => {
     return [...storeStatusLogs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
