@@ -4,10 +4,11 @@ import { loadData, formatCurrency } from '../data/demoData';
 import Notification from '../components/Notification';
 import { subscribeSales } from '../services/salesService';
 import { subscribeProducts } from '../services/inventoryService';
+import { printHtmlDocument } from '../services/printService';
 import { normalizePaymentMethod } from '../utils/paymentUtils';
 import { getNetSaleTotal, isReportableSale } from '../utils/salesUtils';
 import { subscribeSpecialOrderPayments, subscribeSpecialOrders } from '../services/specialOrdersService';
-import { normalizeSpecialOrder, SPECIAL_ORDER_STATUS } from '../utils/specialOrderUtils';
+import { getStandaloneSpecialOrderPaymentNet, normalizeSpecialOrder, SPECIAL_ORDER_STATUS } from '../utils/specialOrderUtils';
 
 const Reports = () => {
   const [sales, setSales] = useState([]);

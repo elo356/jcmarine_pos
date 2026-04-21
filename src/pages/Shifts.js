@@ -229,11 +229,7 @@ const Shifts = () => {
     if (!targetShift) return;
 
     const endTime = new Date();
-<<<<<<< HEAD
-    const { totalHours, totalSales } = calculateShiftTotals(targetShift, sales, {
-=======
-    const { totalHours, totalSales } = calculateShiftTotals(activeShift, sales, specialOrderPayments, {
->>>>>>> cb02b53b2039d9378068e830f050d9bd87721d1f
+    const { totalHours, totalSales } = calculateShiftTotals(targetShift, sales, specialOrderPayments, {
       endTime: endTime.toISOString()
     });
 

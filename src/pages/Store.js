@@ -10,13 +10,9 @@ import { subscribeSales } from '../services/salesService';
 import { subscribeShifts } from '../services/shiftsService';
 import { verifyFirestoreAvailability } from '../services/firestoreHealthService';
 import { createStoreStatusLog, subscribeStoreStatusLogs } from '../services/storeStatusLogService';
-<<<<<<< HEAD
 import { saveWeeklyShiftClosure, subscribeWeeklyShiftClosures } from '../services/weeklyShiftClosureService';
-import { PAYMENT_METHODS } from '../utils/paymentUtils';
-=======
 import { subscribeSpecialOrderPayments } from '../services/specialOrdersService';
 import { normalizePaymentMethod, PAYMENT_METHODS } from '../utils/paymentUtils';
->>>>>>> cb02b53b2039d9378068e830f050d9bd87721d1f
 import { buildStoreClosurePrintHtml } from '../utils/printTemplates';
 import { getNetSaleTotal, getSaleRefundTotal, isReportableSale } from '../utils/salesUtils';
 import { getStandaloneSpecialOrderPaymentNet } from '../utils/specialOrderUtils';
@@ -66,11 +62,8 @@ const StorePage = () => {
   const { user, profile } = useAuth();
   const [employees, setEmployees] = useState([]);
   const [sales, setSales] = useState([]);
-<<<<<<< HEAD
   const [shifts, setShifts] = useState([]);
-=======
   const [specialOrderPayments, setSpecialOrderPayments] = useState([]);
->>>>>>> cb02b53b2039d9378068e830f050d9bd87721d1f
   const [storeStatusLogs, setStoreStatusLogs] = useState([]);
   const [weeklyShiftClosures, setWeeklyShiftClosures] = useState([]);
   const [showOpenModal, setShowOpenModal] = useState(false);
@@ -131,15 +124,13 @@ const StorePage = () => {
       (rows) => setStoreStatusLogs(rows),
       (error) => console.error('Error subscribing store status logs in store page:', error)
     );
-<<<<<<< HEAD
     const unsubWeeklyShiftClosures = subscribeWeeklyShiftClosures(
       (rows) => setWeeklyShiftClosures(rows),
       (error) => console.error('Error subscribing weekly shift closures in store page:', error)
-=======
+    );
     const unsubSpecialPayments = subscribeSpecialOrderPayments(
       (rows) => setSpecialOrderPayments(rows),
       (error) => console.error('Error subscribing special order payments in store page:', error)
->>>>>>> cb02b53b2039d9378068e830f050d9bd87721d1f
     );
 
     return () => {
@@ -147,11 +138,8 @@ const StorePage = () => {
       unsubSales();
       unsubShifts();
       unsubStoreStatusLogs();
-<<<<<<< HEAD
-      unsubWeeklyShiftClosures();
-=======
       unsubSpecialPayments();
->>>>>>> cb02b53b2039d9378068e830f050d9bd87721d1f
+      unsubWeeklyShiftClosures();
     };
   }, []);
 
