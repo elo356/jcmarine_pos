@@ -601,14 +601,27 @@ function POS({
     return '';
   }, [activeShifts.length, isStoreOpen, profile?.role, selectedShift]);
 
+  const openPaymentBlockReason = useMemo(() => {
+    if (!isStoreOpen) {
+      return 'La tienda debe estar abierta antes de cobrar.';
+    }
+
+    return '';
+  }, [isStoreOpen]);
+
   const ensureCheckoutReady = useCallback(async () => {
     if (!isStoreOpen) {
       showNotification('error', 'Primero abre la tienda antes de cobrar.');
       return false;
     }
 
+    if (profile?.role === 'admin' && activeShifts.length > 1 && !selectedShift) {
+      showNotification('error', 'Selecciona el turno al que le pertenece esta venta antes de cobrar.');
+      return false;
+    }
+
     return true;
-  }, [isStoreOpen]);
+  }, [activeShifts.length, isStoreOpen, profile?.role, selectedShift]);
 
   const spinConfigurationMessage = useMemo(() => {
     if (spinConfiguration.isConfigured) {
@@ -1628,14 +1641,14 @@ function POS({
                 <button
                   onClick={handleOpenPaymentModal}
                   className="w-full mt-4 py-3 btn btn-success flex items-center justify-center gap-2"
-                  disabled={Boolean(checkoutBlockReason)}
+                  disabled={Boolean(openPaymentBlockReason)}
                 >
                   <CreditCard size={20} />
-                  {checkoutBlockReason ? 'Cobro bloqueado' : 'Cobrar'}
+                  {openPaymentBlockReason ? 'Cobro bloqueado' : 'Cobrar'}
                 </button>
-                {checkoutBlockReason && (
+                {openPaymentBlockReason && (
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                    {checkoutBlockReason}
+                    {openPaymentBlockReason}
                   </div>
                 )}
               </div>
