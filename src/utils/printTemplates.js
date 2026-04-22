@@ -121,20 +121,15 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
         <tbody>
           ${summary.items.map((item) => `
             <tr>
-<<<<<<< HEAD
-              <td>${item.name}${item.discountAmount > 0 ? ` <span class="muted">(Desc. ${formatCurrency(item.discountAmount)})</span>` : ''}</td>
-              <td>${formatQuantity(item.quantity, item.unitType)}</td>
-              <td>${formatCurrency(item.price || 0)}</td>
-              <td>${formatCurrency(item.taxableSubtotal || item.subtotal || ((Number(item.price || 0) * Number(item.quantity || 0)) - Number(item.discountAmount || 0)))}</td>
-=======
               <td>
-                ${item.name}${item.quantity > 1 ? ` x${formatQuantity(item.quantity, item.unitType)}` : ''}
+                ${item.name}
                 ${item.discountAmount > 0
                   ? `<div class="muted" style="margin-top:4px;">Descuento ${item.discountType === 'percentage' ? `${item.discountValue}%` : formatCurrency(item.discountValue)}: -${formatCurrency(item.discountAmount)}</div>`
                   : ''}
               </td>
+              <td>${formatQuantity(item.quantity, item.unitType)}</td>
+              <td>${formatCurrency(item.price || 0)}</td>
               <td>${formatCurrency(item.taxableSubtotal)}</td>
->>>>>>> cb02b53b2039d9378068e830f050d9bd87721d1f
             </tr>
           `).join('')}
         </tbody>
@@ -142,21 +137,12 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
     </div>
 
     <div class="totals">
-<<<<<<< HEAD
-      <div class="row"><span>Subtotal (sin IVU)</span><strong>${formatCurrency((sale.subtotal || 0) - (sale.discount || 0))}</strong></div>
-      ${sale.discount > 0 ? `<div class="row"><span>Descuentos</span><strong>-${formatCurrency(sale.discount)}</strong></div>` : ''}
-      <div class="row"><span>IVU municipal</span><strong>${formatCurrency(sale.taxBreakdown?.municipal || 0)}</strong></div>
-      <div class="row"><span>IVU estatal</span><strong>${formatCurrency(sale.taxBreakdown?.state || 0)}</strong></div>
-      <div class="row"><span>IVU total</span><strong>${formatCurrency(sale.tax || ((sale.taxBreakdown?.municipal || 0) + (sale.taxBreakdown?.state || 0)))}</strong></div>
-      <div class="row"><span>Total</span><strong>${formatCurrency(sale.total)}</strong></div>
-=======
       <div class="row"><span>Subtotal</span><strong>${formatCurrency(summary.subtotal)}</strong></div>
       ${summary.discount > 0 ? `<div class="row"><span>Descuentos</span><strong>-${formatCurrency(summary.discount)}</strong></div>` : ''}
       ${summary.taxBreakdown.state > 0 ? `<div class="row"><span>IVU estatal</span><strong>${formatCurrency(summary.taxBreakdown.state)}</strong></div>` : ''}
       ${summary.taxBreakdown.municipal > 0 ? `<div class="row"><span>IVU municipal</span><strong>${formatCurrency(summary.taxBreakdown.municipal)}</strong></div>` : ''}
       <div class="row"><span>IVU total</span><strong>${formatCurrency(summary.tax)}</strong></div>
       <div class="row"><span>Total</span><strong>${formatCurrency(summary.total)}</strong></div>
->>>>>>> cb02b53b2039d9378068e830f050d9bd87721d1f
       <div class="row"><span>Tipo de pago</span><strong>${getPaymentMethodLabel(sale.paymentMethod)}</strong></div>
       ${(sale.payments || []).length > 1 ? (sale.payments || []).map((payment) => `
         <div class="row"><span>${getPaymentMethodLabel(payment.method)}</span><strong>${formatCurrency(payment.amount || 0)}</strong></div>
