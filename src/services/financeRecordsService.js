@@ -50,7 +50,6 @@ export const normalizeExpense = (expense = {}) => ({
   id: normalizeText(expense.id),
   title: normalizeText(expense.title),
   vendor: normalizeText(expense.vendor),
-  category: normalizeText(expense.category),
   paymentMethod: normalizeText(expense.paymentMethod),
   amount: toMoney(expense.amount),
   paidAt: normalizeText(expense.paidAt),
@@ -65,11 +64,14 @@ export const normalizeExpense = (expense = {}) => ({
 
 export const calculateInvoiceTotals = (invoice = {}) => {
   const items = Array.isArray(invoice.items) ? invoice.items : [];
-  const subtotal = toMoney(items.reduce((sum, item) => sum + (toMoney(item.quantity) * toMoney(item.unitPrice)), 0));
-  const taxRate = toMoney(invoice.taxRate);
-  const discountAmount = toMoney(invoice.discountAmount);
-  const taxAmount = toMoney(subtotal * (taxRate / 100));
-  const total = toMoney(subtotal + taxAmount - discountAmount);
+  const explicitAmount = toMoney(invoice.amount);
+  const subtotal = items.length > 0
+    ? toMoney(items.reduce((sum, item) => sum + (toMoney(item.quantity) * toMoney(item.unitPrice)), 0))
+    : explicitAmount;
+  const taxRate = items.length > 0 ? toMoney(invoice.taxRate) : 0;
+  const discountAmount = items.length > 0 ? toMoney(invoice.discountAmount) : 0;
+  const taxAmount = items.length > 0 ? toMoney(subtotal * (taxRate / 100)) : 0;
+  const total = items.length > 0 ? toMoney(subtotal + taxAmount - discountAmount) : explicitAmount;
 
   return {
     subtotal,
@@ -96,17 +98,22 @@ export const normalizeInvoice = (invoice = {}) => {
     id: normalizeText(invoice.id),
     invoiceNumber: normalizeText(invoice.invoiceNumber),
     title: normalizeText(invoice.title),
+    companyName: normalizeText(invoice.companyName || invoice.customerName),
     customerName: normalizeText(invoice.customerName),
     customerEmail: normalizeText(invoice.customerEmail),
     customerPhone: normalizeText(invoice.customerPhone),
+    issuerName: normalizeText(invoice.issuerName) || 'CJ Marine',
+    issuerEmail: normalizeText(invoice.issuerEmail) || 'cjmarinepr@gmail.com',
     billTo: normalizeText(invoice.billTo),
     issueDate: normalizeText(invoice.issueDate),
     dueDate: normalizeText(invoice.dueDate),
     status: normalizeText(invoice.status) || 'draft',
+    paidAt: normalizeText(invoice.paidAt),
     notes: normalizeText(invoice.notes),
     terms: normalizeText(invoice.terms),
     footerText: normalizeText(invoice.footerText),
     items,
+    amount: toMoney(invoice.amount || totals.total),
     subtotal: totals.subtotal,
     taxRate: totals.taxRate,
     taxAmount: totals.taxAmount,
