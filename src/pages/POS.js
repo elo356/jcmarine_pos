@@ -588,18 +588,19 @@ function POS({
   );
 
   const isStoreOpen = Boolean(latestStoreLog && latestStoreLog.action === 'open');
+  const shouldRequireShiftSelection = activeShifts.length > 1;
 
   const checkoutBlockReason = useMemo(() => {
     if (!isStoreOpen) {
       return 'La tienda debe estar abierta antes de cobrar.';
     }
 
-    if (profile?.role === 'admin' && activeShifts.length > 1 && !selectedShift) {
+    if (shouldRequireShiftSelection && !selectedShift) {
       return 'Selecciona el turno al que le pertenece esta venta antes de cobrar.';
     }
 
     return '';
-  }, [activeShifts.length, isStoreOpen, profile?.role, selectedShift]);
+  }, [isStoreOpen, selectedShift, shouldRequireShiftSelection]);
 
   const openPaymentBlockReason = useMemo(() => {
     if (!isStoreOpen) {
@@ -615,13 +616,13 @@ function POS({
       return false;
     }
 
-    if (profile?.role === 'admin' && activeShifts.length > 1 && !selectedShift) {
+    if (shouldRequireShiftSelection && !selectedShift) {
       showNotification('error', 'Selecciona el turno al que le pertenece esta venta antes de cobrar.');
       return false;
     }
 
     return true;
-  }, [activeShifts.length, isStoreOpen, profile?.role, selectedShift]);
+  }, [isStoreOpen, selectedShift, shouldRequireShiftSelection]);
 
   const spinConfigurationMessage = useMemo(() => {
     if (spinConfiguration.isConfigured) {
@@ -685,12 +686,12 @@ function POS({
   }, []);
 
   useEffect(() => {
-    if (profile?.role === 'cashier') {
-      setSelectedShiftId(operatorShift?.id || '');
+    if (selectedShiftId && activeShifts.some((shift) => shift.id === selectedShiftId)) {
       return;
     }
 
-    if (selectedShiftId && activeShifts.some((shift) => shift.id === selectedShiftId)) {
+    if (operatorShift?.id) {
+      setSelectedShiftId(operatorShift.id);
       return;
     }
 
@@ -700,7 +701,7 @@ function POS({
     }
 
     setSelectedShiftId('');
-  }, [activeShifts, operatorShift?.id, profile?.role, selectedShiftId]);
+  }, [activeShifts, operatorShift?.id, selectedShiftId]);
 
   useEffect(() => {
     if (cart.length > 0 || isProcessingPayment || !showPaymentModal) return;
@@ -1637,6 +1638,37 @@ function POS({
                   </div>
                 </div>
 
+                {activeShifts.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-slate-900">Turno de la venta</p>
+                        <p className="text-sm text-slate-600">
+                          La venta se registrara en el turno que selecciones aqui.
+                        </p>
+                      </div>
+                      <span className="text-xs font-medium text-slate-500">
+                        {activeShifts.length} turno{activeShifts.length === 1 ? '' : 's'} abierto{activeShifts.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
+
+                    <select
+                      value={selectedShiftId}
+                      onChange={(e) => setSelectedShiftId(e.target.value)}
+                      className="input w-full"
+                    >
+                      <option value="">
+                        {shouldRequireShiftSelection ? 'Selecciona un turno abierto' : 'Sin turno seleccionado'}
+                      </option>
+                      {activeShifts.map((shift) => (
+                        <option key={shift.id} value={shift.id}>
+                          {shift.employeeName} - {shift.status === 'on_break' ? 'En break' : 'Activo'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 {/* Checkout Button */}
                 <button
                   onClick={handleOpenPaymentModal}
@@ -1675,13 +1707,13 @@ function POS({
             <p className="text-4xl font-bold text-green-600">{formatCurrency(total)}</p>
           </div>
 
-          {profile?.role === 'admin' && activeShifts.length > 0 && (
+          {activeShifts.length > 0 && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="font-medium text-slate-900">Turno de la venta</p>
                   <p className="text-sm text-slate-600">
-                    Si hay varios turnos abiertos, la venta se asigna al empleado que selecciones aqui.
+                    La venta se asigna al empleado del turno que selecciones aqui.
                   </p>
                 </div>
                 <span className="text-xs font-medium text-slate-500">
@@ -1696,7 +1728,7 @@ function POS({
                 disabled={isProcessingPayment}
               >
                 <option value="">
-                  {activeShifts.length > 1 ? 'Selecciona un turno abierto' : 'Sin turno seleccionado'}
+                  {shouldRequireShiftSelection ? 'Selecciona un turno abierto' : 'Sin turno seleccionado'}
                 </option>
                 {activeShifts.map((shift) => (
                   <option key={shift.id} value={shift.id}>
