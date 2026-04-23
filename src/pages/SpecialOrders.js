@@ -12,6 +12,7 @@ import { saveAuditLog } from '../services/auditLogService';
 import { subscribeCategories } from '../services/categoryService';
 import { saveCustomer, subscribeCustomers } from '../services/customersService';
 import { subscribeProducts } from '../services/inventoryService';
+import { getSpinConfigurationState, processSpinCardPayment } from '../services/spinService';
 import {
   applySpecialOrderPayment,
   saveSpecialOrder,
@@ -35,6 +36,11 @@ import {
   SPECIAL_ORDER_STATUS
 } from '../utils/specialOrderUtils';
 import { calculateItemPricing, roundMoney } from '../utils/cartPricing';
+
+const CARD_PAYMENT_MODES = {
+  terminal: 'terminal',
+  manual: 'manual'
+};
 
 const TAB_OPTIONS = [
   { id: 'all', label: 'Todos' },
@@ -68,6 +74,18 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
   const [detailOrder, setDetailOrder] = useState(null);
   const [paymentModalState, setPaymentModalState] = useState({ open: false, order: null, mode: 'payment' });
   const [cancellationOrder, setCancellationOrder] = useState(null);
+  const spinConfiguration = useMemo(() => getSpinConfigurationState(), []);
+  const spinConfigurationMessage = useMemo(() => {
+    if (spinConfiguration.isConfigured) {
+      if (spinConfiguration.merchantIdIgnored) {
+        return `SPIn listo en ${spinConfiguration.apiUrl} usando ${spinConfiguration.tpn || spinConfiguration.registerId}. REACT_APP_SPIN_MERCHANT_ID se ignoro porque no coincide con el formato esperado por SPIn.`;
+      }
+
+      return `SPIn listo en ${spinConfiguration.apiUrl} usando ${spinConfiguration.tpn || spinConfiguration.registerId}.`;
+    }
+
+    return `Falta configurar SPIn: ${spinConfiguration.missing.join(', ')}.`;
+  }, [spinConfiguration]);
 
   useEffect(() => {
     const data = loadData();
@@ -612,33 +630,82 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     }
   };
 
-  const handleRegisterPayment = async ({ amount, method, reference, notes }) => {
+  const handleRegisterPayment = async ({ amount, method, cardMode = CARD_PAYMENT_MODES.terminal, reference, notes }) => {
     const order = paymentModalState.order;
     if (!order) return;
+
+    const isRefund = paymentModalState.mode === 'refund';
+    const isCardPayment = method === 'card' && !isRefund;
+    const useTerminal = isCardPayment && cardMode !== CARD_PAYMENT_MODES.manual;
+
     const currentUser = getCurrentUserIdentity(user, profile, loadData().currentUser);
+
+    if (!isRefund && amount > Number(order.balanceDue || 0)) {
+      showNotification('error', 'El pago no puede exceder el balance pendiente.');
+      return;
+    }
+    if (isRefund && amount > Number(order.amountPaid || 0)) {
+      showNotification('error', 'El reembolso no puede exceder lo cobrado.');
+      return;
+    }
+    if (useTerminal && !spinConfiguration.isConfigured) {
+      showNotification('error', spinConfigurationMessage);
+      return;
+    }
+
+    let paymentEntry = buildPaymentEntry({
+      transactionId: order.id,
+      method,
+      amount,
+      confirmedBy: currentUser.name,
+      reference,
+      processor: isCardPayment
+        ? (useTerminal ? 'spin' : 'manual')
+        : null,
+      processorDetails: isCardPayment && !useTerminal
+        ? { entryMode: CARD_PAYMENT_MODES.manual }
+        : null
+    });
+
+    if (useTerminal) {
+      try {
+        const spinResult = await processSpinCardPayment({
+          amount,
+          refId: `${order.id}_${Date.now()}`,
+          paymentType: 'Credit',
+          cartItems: [],
+          subtotal: 0,
+          discountAmount: 0,
+          tax: 0,
+          total: amount
+        });
+
+        paymentEntry = {
+          ...paymentEntry,
+          processor: 'spin',
+          reference: paymentEntry.reference || spinResult.authCode || spinResult.pnRef || null,
+          processor_reference: spinResult.pnRef || null,
+          processor_status: spinResult.message || null,
+          processor_response: spinResult.respMSG || null,
+          processor_transaction_id: spinResult.transNum || spinResult.extData?.txnId || null,
+          processor_payment_type: spinResult.paymentType || null,
+          processor_details: spinResult
+        };
+      } catch (error) {
+        console.error('Error processing SPIn special order payment:', error);
+        showNotification('error', error?.message || 'La terminal no pudo completar el cobro.');
+        return;
+      }
+    }
+
     const payment = {
-      ...buildPaymentEntry({
-        transactionId: order.id,
-        method,
-        amount,
-        confirmedBy: currentUser.name,
-        reference
-      }),
+      ...paymentEntry,
       specialOrderId: order.id,
-      kind: paymentModalState.mode === 'refund' ? SPECIAL_ORDER_PAYMENT_KIND.refund : SPECIAL_ORDER_PAYMENT_KIND.payment,
+      kind: isRefund ? SPECIAL_ORDER_PAYMENT_KIND.refund : SPECIAL_ORDER_PAYMENT_KIND.payment,
       notes,
       confirmedById: currentUser.id,
       createdAt: new Date().toISOString()
     };
-
-    if (paymentModalState.mode !== 'refund' && amount > Number(order.balanceDue || 0)) {
-      showNotification('error', 'El pago no puede exceder el balance pendiente.');
-      return;
-    }
-    if (paymentModalState.mode === 'refund' && amount > Number(order.amountPaid || 0)) {
-      showNotification('error', 'El reembolso no puede exceder lo cobrado.');
-      return;
-    }
 
     const nextOrder = normalizeSpecialOrder({
       ...order,
@@ -649,8 +716,8 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     const nextPayments = [payment, ...payments];
     const auditEntry = buildSpecialOrderAuditEntry({
       entityId: order.id,
-      action: paymentModalState.mode === 'refund' ? 'refund_registered' : 'payment_registered',
-      description: paymentModalState.mode === 'refund'
+      action: isRefund ? 'refund_registered' : 'payment_registered',
+      description: isRefund
         ? `Reembolso registrado por ${formatCurrency(amount)}`
         : `Pago registrado por ${formatCurrency(amount)}`,
       performedBy: currentUser.name,
@@ -658,6 +725,7 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
       metadata: {
         amount,
         method,
+        processor: payment.processor || null,
         paymentId: payment.id
       }
     });
@@ -681,7 +749,14 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
         description: auditEntry.description
       });
       setDetailOrder(persistedOrder);
-      showNotification('success', paymentModalState.mode === 'refund' ? 'Reembolso registrado.' : 'Pago registrado.');
+      showNotification(
+        'success',
+        isRefund
+          ? 'Reembolso registrado.'
+          : useTerminal
+            ? 'Pago por terminal registrado.'
+            : 'Pago registrado.'
+      );
     } catch (error) {
       console.error('Error applying special order payment:', error);
       showNotification('error', 'No se pudo registrar el movimiento.');
@@ -1033,6 +1108,8 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
         onSubmit={handleRegisterPayment}
         order={paymentModalState.order}
         mode={paymentModalState.mode}
+        spinConfiguration={spinConfiguration}
+        spinConfigurationMessage={spinConfigurationMessage}
       />
 
       <SpecialOrderCancellationModal

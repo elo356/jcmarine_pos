@@ -588,19 +588,15 @@ function POS({
   );
 
   const isStoreOpen = Boolean(latestStoreLog && latestStoreLog.action === 'open');
-  const shouldRequireShiftSelection = activeShifts.length > 1;
+  const shouldRequireShiftSelection = false;
 
   const checkoutBlockReason = useMemo(() => {
     if (!isStoreOpen) {
       return 'La tienda debe estar abierta antes de cobrar.';
     }
 
-    if (shouldRequireShiftSelection && !selectedShift) {
-      return 'Selecciona el turno al que le pertenece esta venta antes de cobrar.';
-    }
-
     return '';
-  }, [isStoreOpen, selectedShift, shouldRequireShiftSelection]);
+  }, [isStoreOpen]);
 
   const openPaymentBlockReason = useMemo(() => {
     if (!isStoreOpen) {
@@ -616,13 +612,8 @@ function POS({
       return false;
     }
 
-    if (shouldRequireShiftSelection && !selectedShift) {
-      showNotification('error', 'Selecciona el turno al que le pertenece esta venta antes de cobrar.');
-      return false;
-    }
-
     return true;
-  }, [isStoreOpen, selectedShift, shouldRequireShiftSelection]);
+  }, [isStoreOpen]);
 
   const spinConfigurationMessage = useMemo(() => {
     if (spinConfiguration.isConfigured) {
