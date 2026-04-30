@@ -1,4 +1,5 @@
 import { IVU_MUNICIPAL_RATE, IVU_STATE_RATE, roundMoney } from './cartPricing';
+import { normalizePaymentMethod } from './paymentUtils';
 
 export const SALE_STATUS = {
   paid: 'paid',
@@ -103,6 +104,35 @@ export const getSaleRefunds = (sale = {}) =>
 
 export const getSaleRefundTotal = (sale = {}) =>
   getSaleRefunds(sale).reduce((sum, refund) => sum + Number(refund.amount || 0), 0);
+
+export const getSaleRefundTotalFrom = (sale = {}, fromTime = 0, method = '') => {
+  const targetMethod = normalizePaymentMethod(method);
+  const fromMs = Number(fromTime || 0);
+
+  return roundMoney(getSaleRefunds(sale).reduce((sum, refund) => {
+    const refundedAtMs = new Date(refund.refundedAt || refund.refunded_at || sale.refunded_at || sale.date).getTime();
+    if (Number.isFinite(fromMs) && Number.isFinite(refundedAtMs) && refundedAtMs < fromMs) return sum;
+    if (targetMethod && normalizePaymentMethod(refund.method || refund.paymentMethod) !== targetMethod) return sum;
+    return sum + Number(refund.amount || 0);
+  }, 0));
+};
+
+export const getSaleTenderTotalByMethod = (sale = {}, method = '') => {
+  const targetMethod = normalizePaymentMethod(method);
+  const payments = Array.isArray(sale.payments) ? sale.payments : [];
+
+  if (payments.length > 0) {
+    return roundMoney(payments.reduce((sum, payment) => (
+      normalizePaymentMethod(payment.method || payment.paymentMethod) === targetMethod
+        ? sum + Number(payment.amount || 0)
+        : sum
+    ), 0));
+  }
+
+  return normalizePaymentMethod(sale.paymentMethod || sale.payment_method) === targetMethod
+    ? roundMoney(Number(sale.total || 0))
+    : 0;
+};
 
 export const getNetSaleTotal = (sale = {}) =>
   Math.max(0, Math.round((Number(sale.total || 0) - getSaleRefundTotal(sale)) * 100) / 100);

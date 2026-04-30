@@ -1,5 +1,3 @@
-const MINUTE_IN_MS = 60 * 1000;
-
 const toDate = (value) => {
   const parsed = new Date(value || 0);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
