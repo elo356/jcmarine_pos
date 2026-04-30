@@ -44,6 +44,7 @@ import { calculateItemPricing } from '../utils/cartPricing';
 import { buildSalePrintHtml } from '../utils/printTemplates';
 import { getSaleFinancialSummary } from '../utils/salesUtils';
 import { printHtmlDocument } from '../services/printService';
+import { getCameraAccessErrorMessage, startCameraBarcodeScanner } from '../utils/cameraBarcodeScanner';
 
 const SHARED_CART_SYNC_DEBOUNCE_MS = 250;
 const DEFAULT_ITEM_DISCOUNT = { type: 'percentage', value: 0 };
@@ -702,7 +703,11 @@ function POS({
 
   const stopScanner = () => {
     if (scannerIntervalRef.current) {
-      clearInterval(scannerIntervalRef.current);
+      if (typeof scannerIntervalRef.current === 'function') {
+        scannerIntervalRef.current();
+      } else {
+        clearInterval(scannerIntervalRef.current);
+      }
       scannerIntervalRef.current = null;
     }
 
@@ -824,6 +829,36 @@ function POS({
         setScannerError('Este navegador no expone acceso directo a cámara. Intenta en Chrome/Safari normal o usa el código manual.');
         return;
       }
+
+      if (!videoRef.current) {
+        setScannerError('No se pudo preparar la vista de camara.');
+        return;
+      }
+
+      let scannerStartHandled = false;
+
+      try {
+        setScannerStatus('Escaneando barcode...');
+        setScannerError('');
+        scannerIntervalRef.current = await startCameraBarcodeScanner({
+          videoElement: videoRef.current,
+          streamRef: scannerStreamRef,
+          onDetected: resolveScannedBarcode
+        });
+        scannerStartHandled = true;
+      } catch (error) {
+        scannerStartHandled = true;
+        console.error('Error starting camera scanner:', error);
+        if (error?.message === 'INSECURE_CONTEXT') {
+          setScannerError('La camara del navegador requiere abrir el sistema por HTTPS o localhost.');
+        } else if (error?.message === 'MEDIA_DEVICES_UNSUPPORTED') {
+          setScannerError('Este navegador no expone acceso directo a camara. Intenta en Chrome/Safari normal o usa el codigo manual.');
+        } else {
+          setScannerError(getCameraAccessErrorMessage(error));
+        }
+        stopScanner();
+      }
+      if (scannerStartHandled) return;
 
       if (typeof window.BarcodeDetector === 'undefined') {
         setScannerError('Este navegador no soporta escaneo de barcode en vivo. Puedes escribir o pegar el código manualmente.');

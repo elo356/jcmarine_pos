@@ -66,7 +66,7 @@ function Sales() {
   const [exchangeTarget, setExchangeTarget] = useState(null);
   const [exchangeForm, setExchangeForm] = useState(DEFAULT_EXCHANGE_FORM);
   const [exchangeReplacementSearch, setExchangeReplacementSearch] = useState('');
-  const [isResettingExchanges, setIsResettingExchanges] = useState(false);
+  const [, setIsResettingExchanges] = useState(false);
 
   useEffect(() => {
     const data = loadData();
@@ -194,11 +194,6 @@ function Sales() {
     if (!selectedReturnedOption || !replacementPricing) return 0;
     return roundMoney(replacementPricing.total - selectedReturnedOption.unitTotal);
   }, [replacementPricing, selectedReturnedOption]);
-  const totalExchangeCount = useMemo(
-    () => sales.reduce((sum, sale) => sum + (Array.isArray(sale.exchanges) ? sale.exchanges.length : 0), 0),
-    [sales]
-  );
-
   useEffect(() => {
     if (!exchangeTarget) {
       setExchangeReplacementSearch('');
@@ -815,26 +810,6 @@ function Sales() {
                 <option value="ath_movil">ATH Móvil</option>
                 <option value="split">Split</option>
               </select>
-              {profile?.role === 'admin' && (
-                <div className="flex flex-col">
-                  <button
-                    type="button"
-                    className={`px-4 py-2 rounded-lg text-sm font-medium ${
-                      isResettingExchanges
-                        ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                        : 'bg-red-600 text-white hover:bg-red-700'
-                    }`}
-                    onClick={handleResetAllExchanges}
-                    disabled={isResettingExchanges || totalExchangeCount === 0}
-                    title="Boton temporal para borrar todos los cambios de pieza y restaurar inventario"
-                  >
-                    {isResettingExchanges ? 'Borrando cambios...' : `Reset cambios (${totalExchangeCount})`}
-                  </button>
-                  <p className="mt-1 text-xs text-red-600">
-                    Temporal: borra todos los cambios de pieza, ajustes y pagos relacionados.
-                  </p>
-                </div>
-              )}
             </div>
           </div>
         </div>

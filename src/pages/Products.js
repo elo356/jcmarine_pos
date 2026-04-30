@@ -27,6 +27,7 @@ import { useRoleDefinitions } from '../hooks/useRoleDefinitions';
 import useIsMobileDevice from '../hooks/useIsMobileDevice';
 import useScannerHidStatus from '../hooks/useScannerHidStatus';
 import useScannerKeyboardInput from '../hooks/useScannerKeyboardInput';
+import { getCameraAccessErrorMessage, startCameraBarcodeScanner } from '../utils/cameraBarcodeScanner';
 
 function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   const { user, profile } = useAuth();
@@ -354,7 +355,11 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
   const stopBarcodeScanner = () => {
     if (barcodeIntervalRef.current) {
-      clearInterval(barcodeIntervalRef.current);
+      if (typeof barcodeIntervalRef.current === 'function') {
+        barcodeIntervalRef.current();
+      } else {
+        clearInterval(barcodeIntervalRef.current);
+      }
       barcodeIntervalRef.current = null;
     }
 
@@ -442,6 +447,36 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         setScannerError('Este navegador no expone acceso directo a cámara. Usa el código manual.');
         return;
       }
+
+      if (!barcodeVideoRef.current) {
+        setScannerError('No se pudo preparar la vista de camara.');
+        return;
+      }
+
+      let scannerStartHandled = false;
+
+      try {
+        setScannerStatus('Escaneando codigo...');
+        setScannerError('');
+        barcodeIntervalRef.current = await startCameraBarcodeScanner({
+          videoElement: barcodeVideoRef.current,
+          streamRef: barcodeStreamRef,
+          onDetected: applyScannedBarcode
+        });
+        scannerStartHandled = true;
+      } catch (error) {
+        scannerStartHandled = true;
+        console.error('Error starting camera in products form:', error);
+        if (error?.message === 'INSECURE_CONTEXT') {
+          setScannerError('La camara del navegador requiere abrir el sistema por HTTPS o localhost.');
+        } else if (error?.message === 'MEDIA_DEVICES_UNSUPPORTED') {
+          setScannerError('Este navegador no expone acceso directo a camara. Usa el codigo manual.');
+        } else {
+          setScannerError(getCameraAccessErrorMessage(error));
+        }
+        stopBarcodeScanner();
+      }
+      if (scannerStartHandled) return;
 
       if (typeof window.BarcodeDetector === 'undefined') {
         setScannerError('Este navegador no soporta escaneo en vivo. Usa el código manual.');
