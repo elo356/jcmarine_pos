@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Store, LogIn, LogOut, Receipt, DollarSign, CalendarClock, Printer, Calculator } from 'lucide-react';
+import { Store, LogIn, LogOut, Receipt, DollarSign, CalendarClock, Printer, Calculator, Search } from 'lucide-react';
 import { loadData, formatCurrency, formatDateTime, generateId, normalizePrintSettings } from '../data/demoData';
 import Modal from '../components/Modal';
 import Input from '../components/Input';
@@ -72,6 +72,7 @@ const StorePage = () => {
   const [startingCash, setStartingCash] = useState('');
   const [openNote, setOpenNote] = useState('');
   const [closeForm, setCloseForm] = useState(DEFAULT_CLOSE_FORM);
+  const [weeklySearchTerm, setWeeklySearchTerm] = useState('');
   const [notification, setNotification] = useState(null);
   const [firestoreReady, setFirestoreReady] = useState(true);
 
@@ -290,6 +291,24 @@ const StorePage = () => {
       }))
       .sort((a, b) => b.stats.totalEarned - a.stats.totalEarned);
   }, [employees, sales, shifts, weeklyShiftClosures]);
+
+  const filteredEmployeeWeeklyRows = useMemo(() => {
+    const search = weeklySearchTerm.trim().toLowerCase();
+    if (!search) return employeeWeeklyRows;
+
+    return employeeWeeklyRows.filter(({ employee }) => {
+      const searchableText = [
+        employee.name,
+        employee.email,
+        employee.role
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      return searchableText.includes(search);
+    });
+  }, [employeeWeeklyRows, weeklySearchTerm]);
 
   const weeklyHistoryRows = useMemo(
     () => [...weeklyShiftClosures].sort((a, b) => new Date(b.closedAt || 0) - new Date(a.closedAt || 0)),
@@ -660,6 +679,21 @@ const StorePage = () => {
           <p className="text-sm text-gray-500">
             Esto muestra lo acumulado desde el ultimo cierre semanal del empleado. El sabado se cierra automaticamente y tambien puedes cerrarlo manualmente.
           </p>
+          <div className="mt-4 max-w-md">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Buscar empleado
+            </label>
+            <div className="relative">
+              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={weeklySearchTerm}
+                onChange={(e) => setWeeklySearchTerm(e.target.value)}
+                placeholder="Busca por nombre, email o rol"
+                className="input w-full pl-10"
+              />
+            </div>
+          </div>
         </div>
         <div className="table-container">
           <table className="table">
@@ -676,12 +710,14 @@ const StorePage = () => {
               </tr>
             </thead>
             <tbody>
-              {employeeWeeklyRows.length === 0 ? (
+              {filteredEmployeeWeeklyRows.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-8 text-gray-500">No hay empleados para calcular.</td>
+                  <td colSpan="8" className="text-center py-8 text-gray-500">
+                    {weeklySearchTerm.trim() ? 'No se encontraron empleados con esa busqueda.' : 'No hay empleados para calcular.'}
+                  </td>
                 </tr>
               ) : (
-                employeeWeeklyRows.map(({ employee, stats }) => (
+                filteredEmployeeWeeklyRows.map(({ employee, stats }) => (
                   <tr key={`weekly_row_${employee.id}`}>
                     <td>{employee.name}</td>
                     <td>{formatDateTime(stats.periodStart)}</td>
