@@ -318,6 +318,7 @@ function Sales() {
     return nextProduct;
   };
 
+  // eslint-disable-next-line no-unused-vars
   const handleResetAllExchanges = async () => {
     if (profile?.role !== 'admin') {
       showNotification('error', 'Solo un admin puede borrar todos los cambios de pieza.');

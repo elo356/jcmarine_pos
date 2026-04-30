@@ -257,6 +257,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     });
     setShowModal(true);
     onPendingDraftHandled();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [buildEditableBarcodes, onPendingDraftHandled, pendingDraft, products]);
 
   const buildAdjacencyMap = (items) => {
