@@ -7,6 +7,7 @@ import {
   formatQuantity,
   generateId,
   getProductBarcodes,
+  getProductSkuReferences,
   normalizeProductTaxConfig
 } from '../data/demoData';
 import Modal from '../components/Modal';
@@ -130,6 +131,7 @@ const Inventory = () => {
         inventory
           .filter((item) =>
             (item.sku || '').toLowerCase().includes(query) ||
+            getProductSkuReferences(item).some((sku) => sku.toLowerCase().includes(query)) ||
             item.name.toLowerCase().includes(query) ||
             getProductBarcodes(item).some((barcode) => barcode.includes(debouncedSearch)) ||
             item.category.toLowerCase().includes(query) ||

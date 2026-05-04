@@ -8,8 +8,10 @@ import {
   saveData,
   getPrimaryProductBarcode,
   getProductBarcodes,
+  getProductSkuReferences,
   normalizeProductTaxConfig,
   normalizeProductBarcodes,
+  normalizeProductSkus,
   normalizeProductSizes,
   normalizeProductSizeStocks
 } from '../data/demoData';
@@ -88,6 +90,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         : 'Este navegador no permite detectar el scanner por USB directamente, pero igual puedes escanear si entra como teclado.';
   const [formData, setFormData] = useState({
     sku: '',
+    alternateSkus: '',
     name: '',
     barcode: '',
     barcodes: [''],
@@ -208,6 +211,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       setLinkedSearchQuery('');
       setFormData({
         sku: template.sku || '',
+        alternateSkus: normalizeProductSkus(template.alternateSkus || template.skuReferences || template.crossReferences || []).join('\n'),
         name: template.name || '',
         barcode: getPrimaryProductBarcode(template),
         barcodes: buildEditableBarcodes(template),
@@ -237,6 +241,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     setLinkedSearchQuery('');
     setFormData({
       sku: '',
+      alternateSkus: '',
       name: '',
       barcode: String(pendingDraft.barcode || '').trim(),
       barcodes: String(pendingDraft.barcode || '').trim() ? [String(pendingDraft.barcode || '').trim()] : [''],
@@ -287,6 +292,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       products
         .filter((product) =>
           (product.sku || '').toLowerCase().includes(query) ||
+          getProductSkuReferences(product).some((sku) => sku.toLowerCase().includes(query)) ||
           product.name.toLowerCase().includes(query) ||
           getProductBarcodes(product).some((barcode) => barcode.includes(debouncedSearchQuery)) ||
           (product.description || '').toLowerCase().includes(query) ||
@@ -545,6 +551,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       setEditingProduct(product);
       setFormData({
         sku: product.sku || '',
+        alternateSkus: normalizeProductSkus(product.alternateSkus || product.skuReferences || product.crossReferences || []).join('\n'),
         name: product.name,
         barcode: getPrimaryProductBarcode(product),
         barcodes: buildEditableBarcodes(product),
@@ -568,6 +575,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       setEditingProduct(null);
       setFormData({
         sku: '',
+        alternateSkus: '',
         name: '',
         barcode: '',
         barcodes: [''],
@@ -596,6 +604,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     setLinkedSearchQuery('');
     setFormData({
       sku: '',
+      alternateSkus: '',
       name: '',
       barcode: '',
       barcodes: [''],
@@ -707,6 +716,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     e.preventDefault();
 
     const normalizedSku = (formData.sku || '').trim().toUpperCase();
+    const alternateSkus = normalizeProductSkus(formData.alternateSkus).filter((sku) => sku !== normalizedSku);
+    const allSkus = [normalizedSku, ...alternateSkus];
     const normalizedBarcodes = normalizeProductBarcodes(formData);
     if (!normalizedSku) {
       showNotification('error', 'El SKU es requerido');
@@ -720,11 +731,12 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
     const duplicateSku = products.find((p) => {
       if (editingProduct && p.id === editingProduct.id) return false;
-      return (p.sku || '').trim().toUpperCase() === normalizedSku;
+      return getProductSkuReferences(p).some((sku) => allSkus.includes(sku));
     });
 
     if (duplicateSku) {
-      showNotification('error', `El SKU ya existe: ${normalizedSku}`);
+      const repeatedSku = getProductSkuReferences(duplicateSku).find((sku) => allSkus.includes(sku));
+      showNotification('error', `El SKU o referencia ${repeatedSku} ya existe en ${duplicateSku.name}`);
       return;
     }
 
@@ -766,6 +778,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
           return {
             ...p,
             sku: normalizedSku,
+            alternateSkus,
             name: formData.name,
             barcode: normalizedBarcodes[0] || '',
             barcodes: normalizedBarcodes,
@@ -818,6 +831,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       const newProduct = {
         id: newProductId,
         sku: normalizedSku,
+        alternateSkus,
         name: formData.name,
         barcode: normalizedBarcodes[0] || '',
         barcodes: normalizedBarcodes,
@@ -1090,6 +1104,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
       const col = {
         sku: findColumn(['sku', 'id', 'codigointerno', 'codigo', 'referencia']),
+        alternateSkus: findColumn(['skus', 'referencias', 'crossreferences', 'crossreference', 'crossrefs', 'alternatesku']),
         name: findColumn(['nombre', 'name', 'producto', 'product']),
         barcode: findColumn(['barcode', 'codigobarras', 'ean', 'upc']),
         location: findColumn(['ubicacion', 'location', 'locacion', 'rack', 'shelf']),
@@ -1140,9 +1155,9 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
       const currentProducts = [...products];
       const bySku = new Map(
-        currentProducts
-          .filter((p) => p.sku)
-          .map((p) => [String(p.sku).trim().toUpperCase(), p])
+        currentProducts.flatMap((p) =>
+          getProductSkuReferences(p).map((sku) => [sku, p])
+        )
       );
       const byBarcode = new Map(
         currentProducts.flatMap((p) =>
@@ -1160,6 +1175,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         if (!nameRaw.trim()) return;
 
         const normalizedSku = skuRaw ? String(skuRaw).trim().toUpperCase() : '';
+        const importedAlternateSkus = normalizeProductSkus(col.alternateSkus >= 0 ? row[col.alternateSkus] : '');
         const normalizedBarcode = barcodeRaw ? String(barcodeRaw).trim() : '';
 
         const matched =
@@ -1171,6 +1187,10 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
         const payload = {
           sku: normalizedSku || (matched?.sku || ''),
+          alternateSkus: normalizeProductSkus([
+            ...(matched?.alternateSkus || []),
+            ...importedAlternateSkus
+          ]).filter((sku) => sku !== (normalizedSku || matched?.sku || '').trim().toUpperCase()),
           name: nameRaw.trim(),
           barcode: normalizedBarcode || getPrimaryProductBarcode(matched),
           barcodes: normalizedBarcode
@@ -1210,7 +1230,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
           const id = generateId('prod');
           const newProduct = { id, ...payload };
           currentProducts.push(newProduct);
-          if (newProduct.sku) bySku.set(newProduct.sku, newProduct);
+          getProductSkuReferences(newProduct).forEach((sku) => bySku.set(sku, newProduct));
           getProductBarcodes(newProduct).forEach((barcode) => byBarcode.set(barcode, newProduct));
           created += 1;
         }
@@ -1374,7 +1394,14 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                           </div>
                         </div>
                       </td>
-                      <td className="font-mono text-sm">{product.sku || '-'}</td>
+                      <td className="font-mono text-sm">
+                        <div>{product.sku || '-'}</div>
+                        {(product.alternateSkus || []).length > 0 && (
+                          <div className="mt-1 text-xs text-gray-500 whitespace-normal break-words">
+                            Ref: {product.alternateSkus.join(', ')}
+                          </div>
+                        )}
+                      </td>
                       <td className="font-mono text-sm">{getProductBarcodes(product).join(', ') || '-'}</td>
                       <td className="font-mono text-sm">{product.location || '-'}</td>
                       <td>
@@ -1582,6 +1609,16 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                 onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
                 required
                 placeholder="Ej: APPLE-IP15-128-BLK"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">SKU / Cross references adicionales</label>
+              <textarea
+                value={formData.alternateSkus}
+                onChange={(e) => setFormData({ ...formData, alternateSkus: e.target.value })}
+                className="input w-full h-20 font-mono text-sm"
+                placeholder="Una referencia por linea"
               />
             </div>
 

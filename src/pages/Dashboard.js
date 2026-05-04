@@ -15,7 +15,12 @@ import { subscribeEmployees } from '../services/employeesService';
 import { getPaymentMethodLabel, normalizePaymentMethod } from '../utils/paymentUtils';
 import { getNetSaleTotal, isRefundedSale, isReportableSale } from '../utils/salesUtils';
 import { subscribeSpecialOrderPayments, subscribeSpecialOrders } from '../services/specialOrdersService';
-import { getStandaloneSpecialOrderPaymentNet, normalizeSpecialOrder, SPECIAL_ORDER_STATUS } from '../utils/specialOrderUtils';
+import {
+  getStandaloneSpecialOrderPaymentNet,
+  normalizeSpecialOrder,
+  SPECIAL_ORDER_PAYMENT_KIND,
+  SPECIAL_ORDER_STATUS
+} from '../utils/specialOrderUtils';
 
 function Dashboard() {
   const [sales, setSales] = useState([]);
@@ -79,17 +84,13 @@ function Dashboard() {
     const pendingBalance = hydratedSpecialOrders
       .filter((order) => order.orderStatus !== SPECIAL_ORDER_STATUS.canceled)
       .reduce((sum, order) => sum + Number(order.balanceDue || 0), 0);
-    const deliveredSpecialOrdersToday = hydratedSpecialOrders.filter((order) => {
-      if (order.orderStatus !== SPECIAL_ORDER_STATUS.delivered || !order.deliveredAt) return false;
-      return new Date(order.deliveredAt) >= today;
-    });
-    const todaySpecialOrderProfit = deliveredSpecialOrdersToday.reduce(
-      (sum, order) => sum + order.items.reduce(
-        (itemSum, item) => itemSum + ((Number(item.unitPrice || 0) - Number(item.unitCost || 0)) * Number(item.quantity || 0)),
-        0
-      ),
-      0
-    );
+    const todaySpecialOrderPaymentsNet = specialOrderPayments
+      .filter((payment) => new Date(payment.createdAt || payment.created_at || payment.confirmed_at) >= today)
+      .reduce((sum, payment) => (
+        payment.kind === SPECIAL_ORDER_PAYMENT_KIND.refund
+          ? sum - Number(payment.amount || 0)
+          : sum + Number(payment.amount || 0)
+      ), 0);
     
     setStats({
       todaySales: todaySales.length,
@@ -100,7 +101,7 @@ function Dashboard() {
       activeEmployees: employees.filter(e => e.active || e.status === 'active').length,
       readyOrders: readyOrders.length,
       pendingSpecialBalance: pendingBalance,
-      todaySpecialOrderProfit
+      todaySpecialOrderPaymentsNet
     });
 
     setRecentSales(sales.slice(0, 5));
@@ -233,9 +234,9 @@ function Dashboard() {
         <div className="card p-6 hover:shadow-lg transition-shadow">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500 mb-1">Ganancia pedidos hoy</p>
-              <p className="text-3xl font-bold text-gray-900">{formatCurrency(stats.todaySpecialOrderProfit || 0)}</p>
-              <p className="text-sm text-indigo-600 mt-2">Solo pedidos entregados hoy</p>
+              <p className="text-sm text-gray-500 mb-1">Pedidos cobrados hoy</p>
+              <p className="text-3xl font-bold text-gray-900">{formatCurrency(stats.todaySpecialOrderPaymentsNet || 0)}</p>
+              <p className="text-sm text-indigo-600 mt-2">Pagos netos de pedidos</p>
             </div>
             <TrendingUp size={28} className="text-indigo-600" />
           </div>

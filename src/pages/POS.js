@@ -8,6 +8,7 @@ import {
   generateId,
   getPrimaryProductBarcode,
   getProductBarcodes,
+  getProductSkuReferences,
   normalizeProductTaxConfig,
   productMatchesBarcode,
   normalizePrintSettings
@@ -296,6 +297,7 @@ function POS({
         products
           .filter((product) =>
             (product.sku || '').toLowerCase().includes(query) ||
+            getProductSkuReferences(product).some((sku) => sku.toLowerCase().includes(query)) ||
             product.name.toLowerCase().includes(query) ||
             getProductBarcodes(product).some((barcode) => barcode.includes(debouncedSearch)) ||
             (product.description || '').toLowerCase().includes(query)

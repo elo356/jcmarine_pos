@@ -60,6 +60,21 @@ export const getProductBarcodes = (product = {}) => normalizeProductBarcodes(pro
 
 export const getPrimaryProductBarcode = (product = {}) => getProductBarcodes(product)[0] || '';
 
+export const normalizeProductSkus = (value = []) => {
+  const source = Array.isArray(value)
+    ? value
+    : String(value || '').split(/[\n,;]+/);
+
+  return [...new Set(source.map((item) => String(item || '').trim().toUpperCase()).filter(Boolean))];
+};
+
+export const getProductSkuReferences = (product = {}) => normalizeProductSkus([
+  product.sku || '',
+  ...(Array.isArray(product.alternateSkus) ? product.alternateSkus : []),
+  ...(Array.isArray(product.skuReferences) ? product.skuReferences : []),
+  ...(Array.isArray(product.crossReferences) ? product.crossReferences : [])
+]);
+
 export const productMatchesBarcode = (product = {}, barcode = '') => {
   const normalizedBarcode = String(barcode || '').trim();
   if (!normalizedBarcode) return false;
@@ -69,9 +84,15 @@ export const productMatchesBarcode = (product = {}, barcode = '') => {
 export const normalizeProductTaxConfig = (product = {}) => {
   const sizeStocks = normalizeProductSizeStocks(product.sizeStocks, product.availableSizes);
   const barcodes = normalizeProductBarcodes(product);
+  const sku = String(product.sku || '').trim().toUpperCase();
+  const alternateSkus = normalizeProductSkus(
+    product.alternateSkus || product.skuReferences || product.crossReferences || []
+  ).filter((item) => item !== sku);
 
   return {
     ...product,
+    sku,
+    alternateSkus,
     barcode: barcodes[0] || '',
     barcodes,
     ivuStateEnabled: product.ivuStateEnabled !== false,

@@ -4,7 +4,7 @@ import Modal from '../Modal';
 import Input from '../Input';
 import Select from '../Select';
 import CustomerLookupSection from './CustomerLookupSection';
-import { formatCurrency, formatQuantity, getPrimaryProductBarcode, getProductBarcodes } from '../../data/demoData';
+import { formatCurrency, formatQuantity, getPrimaryProductBarcode, getProductBarcodes, getProductSkuReferences } from '../../data/demoData';
 import { calculateItemPricing, IVU_MUNICIPAL_RATE, IVU_STATE_RATE, roundMoney } from '../../utils/cartPricing';
 
 const DEFAULT_ITEM_DISCOUNT = { type: 'percentage', value: 0 };
@@ -72,6 +72,7 @@ function SpecialOrderForm({
       return [
         product.name,
         product.sku || '',
+        ...getProductSkuReferences(product),
         ...getProductBarcodes(product),
         product.description || ''
       ].join(' ').toLowerCase().includes(query);
