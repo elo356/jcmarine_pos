@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Store, LogIn, LogOut, Receipt, DollarSign, CalendarClock, Printer, Calculator, Search } from 'lucide-react';
+import { Store, LogIn, LogOut, Receipt, DollarSign, CalendarClock, Printer, Calculator, Search, Scale } from 'lucide-react';
 import { loadData, formatCurrency, formatDateTime, generateId, normalizePrintSettings } from '../data/demoData';
 import Modal from '../components/Modal';
 import Input from '../components/Input';
@@ -20,7 +20,7 @@ import {
   getSaleTenderTotalByMethod,
   isReportableSale
 } from '../utils/salesUtils';
-import { getStandaloneSpecialOrderPaymentNet } from '../utils/specialOrderUtils';
+import { getStandaloneSpecialOrderPaymentNet, SPECIAL_ORDER_SALE_TYPE } from '../utils/specialOrderUtils';
 import { printHtmlDocument } from '../services/printService';
 import {
   buildWeeklyShiftClosureRecord,

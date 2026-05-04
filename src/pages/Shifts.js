@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { Clock, LogIn, LogOut, Coffee, Calendar, DollarSign } from 'lucide-react';
+import { Clock, LogIn, LogOut, Coffee, Calendar, DollarSign, Edit, Save } from 'lucide-react';
 import { loadData, formatDate, formatDateTime, formatCurrency, formatDuration, generateId } from '../data/demoData';
 import Modal from '../components/Modal';
 import Input from '../components/Input';
@@ -53,9 +53,27 @@ const calculateShiftTotals = (shift, sales, specialOrderPayments = [], options =
   };
 };
 
+const toDateTimeLocalValue = (value) => {
+  if (!value) return '';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const localDate = new Date(date.getTime() - (date.getTimezoneOffset() * 60000));
+  return localDate.toISOString().slice(0, 16);
+};
+
+const dateTimeLocalToIso = (value) => {
+  if (!value) return null;
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+};
+
 const Shifts = () => {
   const { user, profile } = useAuth();
   const isCashier = profile?.role === 'cashier';
+  const canManuallyEditShifts = profile?.role === 'admin';
   const [shifts, setShifts] = useState([]);
   const [sales, setSales] = useState([]);
   const [specialOrderPayments, setSpecialOrderPayments] = useState([]);
@@ -67,6 +85,8 @@ const Shifts = () => {
   const [showBreakModal, setShowBreakModal] = useState(false);
   const [breakNote, setBreakNote] = useState('');
   const [breakTargetShift, setBreakTargetShift] = useState(null);
+  const [editShiftTarget, setEditShiftTarget] = useState(null);
+  const [editShiftForm, setEditShiftForm] = useState({ startTime: '', endTime: '' });
   const [notification, setNotification] = useState(null);
   const [filterEmployee, setFilterEmployee] = useState('all');
   const [now, setNow] = useState(Date.now());
@@ -181,6 +201,21 @@ const Shifts = () => {
     setShowBreakModal(false);
     setBreakTargetShift(null);
     setBreakNote('');
+  };
+
+  const openEditShiftModal = (shift) => {
+    if (!canManuallyEditShifts) return;
+
+    setEditShiftTarget(shift);
+    setEditShiftForm({
+      startTime: toDateTimeLocalValue(shift.startTime),
+      endTime: toDateTimeLocalValue(shift.endTime)
+    });
+  };
+
+  const closeEditShiftModal = () => {
+    setEditShiftTarget(null);
+    setEditShiftForm({ startTime: '', endTime: '' });
   };
 
   const handleClockIn = async () => {
@@ -301,6 +336,50 @@ const Shifts = () => {
     } catch (error) {
       console.error(error);
       setNotification({ type: 'error', message: 'No se pudo finalizar break en Firestore.' });
+    }
+  };
+
+  const handleManualShiftTimeSave = async () => {
+    if (!canManuallyEditShifts || !editShiftTarget) return;
+
+    const startTime = dateTimeLocalToIso(editShiftForm.startTime);
+    const endTime = dateTimeLocalToIso(editShiftForm.endTime);
+
+    if (!startTime) {
+      setNotification({ type: 'error', message: 'Selecciona una hora de entrada valida.' });
+      return;
+    }
+
+    if (endTime && new Date(endTime) < new Date(startTime)) {
+      setNotification({ type: 'error', message: 'La hora de cierre no puede ser antes de la entrada.' });
+      return;
+    }
+
+    const totals = calculateShiftTotals(editShiftTarget, sales, specialOrderPayments, {
+      startTime,
+      endTime
+    });
+    const nextStatus = endTime
+      ? 'completed'
+      : ['active', 'on_break'].includes(editShiftTarget.status)
+        ? editShiftTarget.status
+        : 'active';
+
+    try {
+      await patchShift(editShiftTarget.id, {
+        startTime,
+        endTime,
+        status: nextStatus,
+        totalHours: endTime ? Math.max(0, totals.totalHours) : 0,
+        totalSales: totals.totalSales,
+        manuallyAdjustedAt: new Date().toISOString(),
+        manuallyAdjustedBy: profile?.name || user?.email || 'Admin'
+      });
+      setNotification({ type: 'success', message: `Horas actualizadas para ${editShiftTarget.employeeName}.` });
+      closeEditShiftModal();
+    } catch (error) {
+      console.error(error);
+      setNotification({ type: 'error', message: 'No se pudieron actualizar las horas del shift.' });
     }
   };
 
@@ -524,37 +603,49 @@ const Shifts = () => {
                       <td>{salesAmount > 0 ? formatCurrency(salesAmount) : '-'}</td>
                       <td>{getStatusBadge(shift)}</td>
                       <td>
-                        {!shift.endTime ? (
-                          <div className="flex flex-wrap gap-2">
-                            {shift.status === 'active' && (
+                        <div className="flex flex-wrap gap-2">
+                          {!shift.endTime ? (
+                            <>
+                              {shift.status === 'active' && (
+                                <button
+                                  type="button"
+                                  onClick={() => openBreakModalForShift(shift)}
+                                  className="text-xs text-amber-700 hover:underline"
+                                >
+                                  Break
+                                </button>
+                              )}
+                              {shift.status === 'on_break' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleEndBreak(shift)}
+                                  className="text-xs text-blue-700 hover:underline"
+                                >
+                                  Reanudar
+                                </button>
+                              )}
                               <button
                                 type="button"
-                                onClick={() => openBreakModalForShift(shift)}
-                                className="text-xs text-amber-700 hover:underline"
+                                onClick={() => handleClockOut(shift)}
+                                className="text-xs text-red-700 hover:underline"
                               >
-                                Break
+                                Clock out
                               </button>
-                            )}
-                            {shift.status === 'on_break' && (
-                              <button
-                                type="button"
-                                onClick={() => handleEndBreak(shift)}
-                                className="text-xs text-blue-700 hover:underline"
-                              >
-                                Reanudar
-                              </button>
-                            )}
+                            </>
+                          ) : !canManuallyEditShifts ? (
+                            <span className="text-xs text-gray-400">Sin acciones</span>
+                          ) : null}
+                          {canManuallyEditShifts && (
                             <button
                               type="button"
-                              onClick={() => handleClockOut(shift)}
-                              className="text-xs text-red-700 hover:underline"
+                              onClick={() => openEditShiftModal(shift)}
+                              className="inline-flex items-center gap-1 text-xs text-indigo-700 hover:underline"
                             >
-                              Clock out
+                              <Edit size={12} />
+                              Editar horas
                             </button>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-gray-400">Sin acciones</span>
-                        )}
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -597,6 +688,44 @@ const Shifts = () => {
               <button onClick={handleClockIn} className="btn-primary">
                 <LogIn size={16} className="mr-2" />
                 Clock In
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {editShiftTarget && (
+        <Modal isOpen={Boolean(editShiftTarget)} onClose={closeEditShiftModal} title="Editar horas del shift" size="md">
+          <div className="space-y-4">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+              <p className="text-gray-600">Empleado</p>
+              <p className="font-semibold text-gray-900">{editShiftTarget.employeeName}</p>
+            </div>
+
+            <Input
+              label="Hora de entrada"
+              type="datetime-local"
+              value={editShiftForm.startTime}
+              onChange={(e) => setEditShiftForm((prev) => ({ ...prev, startTime: e.target.value }))}
+              required
+            />
+
+            <Input
+              label="Hora de cierre"
+              type="datetime-local"
+              value={editShiftForm.endTime}
+              onChange={(e) => setEditShiftForm((prev) => ({ ...prev, endTime: e.target.value }))}
+            />
+
+            <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-sm text-blue-800">
+              Deja la hora de cierre vacia si el shift debe quedar abierto.
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4">
+              <button onClick={closeEditShiftModal} className="btn-secondary">Cancelar</button>
+              <button onClick={handleManualShiftTimeSave} className="btn-primary">
+                <Save size={16} className="mr-2" />
+                Guardar horas
               </button>
             </div>
           </div>
