@@ -355,6 +355,16 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       .filter((id) => id && id !== selfId && validIds.has(id));
   };
 
+  const getProductIdsMatchingSkuReferences = (skus, selfId = null) => {
+    const skuSet = new Set(normalizeProductSkus(skus));
+    if (skuSet.size === 0) return [];
+
+    return products
+      .filter((product) => product.id !== selfId)
+      .filter((product) => getProductSkuReferences(product).some((sku) => skuSet.has(sku)))
+      .map((product) => product.id);
+  };
+
   const getLinkedProducts = (product) => {
     const linkedIds = new Set(product.linkedProductIds || []);
     return products.filter((item) => linkedIds.has(item.id));
@@ -717,7 +727,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
     const normalizedSku = (formData.sku || '').trim().toUpperCase();
     const alternateSkus = normalizeProductSkus(formData.alternateSkus).filter((sku) => sku !== normalizedSku);
-    const allSkus = [normalizedSku, ...alternateSkus];
     const normalizedBarcodes = normalizeProductBarcodes(formData);
     if (!normalizedSku) {
       showNotification('error', 'El SKU es requerido');
@@ -731,12 +740,11 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
     const duplicateSku = products.find((p) => {
       if (editingProduct && p.id === editingProduct.id) return false;
-      return getProductSkuReferences(p).some((sku) => allSkus.includes(sku));
+      return getProductSkuReferences(p).includes(normalizedSku);
     });
 
     if (duplicateSku) {
-      const repeatedSku = getProductSkuReferences(duplicateSku).find((sku) => allSkus.includes(sku));
-      showNotification('error', `El SKU o referencia ${repeatedSku} ya existe en ${duplicateSku.name}`);
+      showNotification('error', `El SKU ${normalizedSku} ya existe en ${duplicateSku.name}`);
       return;
     }
 
@@ -768,7 +776,11 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     }
     const currentProducts = products || [];
     if (editingProduct) {
-      const linkedProductIds = normalizeLinkedIds(formData.linkedProductIds, editingProduct.id);
+      const autoLinkedProductIds = getProductIdsMatchingSkuReferences(alternateSkus, editingProduct.id);
+      const linkedProductIds = normalizeLinkedIds(
+        [...formData.linkedProductIds, ...autoLinkedProductIds],
+        editingProduct.id
+      );
       const previousLinked = editingProduct.linkedProductIds || [];
       const removedLinks = previousLinked.filter((id) => !linkedProductIds.includes(id));
 
@@ -825,7 +837,11 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       return;
     } else {
       const newProductId = generateId('prod');
-      const linkedProductIds = normalizeLinkedIds(formData.linkedProductIds, newProductId);
+      const autoLinkedProductIds = getProductIdsMatchingSkuReferences(alternateSkus);
+      const linkedProductIds = normalizeLinkedIds(
+        [...formData.linkedProductIds, ...autoLinkedProductIds],
+        newProductId
+      );
 
       // Crear nuevo producto
       const newProduct = {
