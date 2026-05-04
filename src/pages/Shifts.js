@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { Clock, LogIn, LogOut, Coffee, Calendar, DollarSign, Edit, Save } from 'lucide-react';
+import { Clock, LogIn, LogOut, Coffee, Calendar, DollarSign, Edit, Save, Plus, Trash2 } from 'lucide-react';
 import { loadData, formatDate, formatDateTime, formatCurrency, formatDuration, generateId } from '../data/demoData';
 import Modal from '../components/Modal';
 import Input from '../components/Input';
@@ -86,7 +86,7 @@ const Shifts = () => {
   const [breakNote, setBreakNote] = useState('');
   const [breakTargetShift, setBreakTargetShift] = useState(null);
   const [editShiftTarget, setEditShiftTarget] = useState(null);
-  const [editShiftForm, setEditShiftForm] = useState({ startTime: '', endTime: '' });
+  const [editShiftForm, setEditShiftForm] = useState({ startTime: '', endTime: '', breaks: [] });
   const [notification, setNotification] = useState(null);
   const [filterEmployee, setFilterEmployee] = useState('all');
   const [now, setNow] = useState(Date.now());
@@ -209,13 +209,50 @@ const Shifts = () => {
     setEditShiftTarget(shift);
     setEditShiftForm({
       startTime: toDateTimeLocalValue(shift.startTime),
-      endTime: toDateTimeLocalValue(shift.endTime)
+      endTime: toDateTimeLocalValue(shift.endTime),
+      breaks: (shift.breaks || []).map((shiftBreak) => ({
+        id: shiftBreak.id || generateId('break'),
+        startTime: toDateTimeLocalValue(shiftBreak.startTime),
+        endTime: toDateTimeLocalValue(shiftBreak.endTime),
+        notes: shiftBreak.notes || ''
+      }))
     });
   };
 
   const closeEditShiftModal = () => {
     setEditShiftTarget(null);
-    setEditShiftForm({ startTime: '', endTime: '' });
+    setEditShiftForm({ startTime: '', endTime: '', breaks: [] });
+  };
+
+  const updateEditedBreak = (breakId, field, value) => {
+    setEditShiftForm((prev) => ({
+      ...prev,
+      breaks: prev.breaks.map((shiftBreak) => (
+        shiftBreak.id === breakId ? { ...shiftBreak, [field]: value } : shiftBreak
+      ))
+    }));
+  };
+
+  const addEditedBreak = () => {
+    setEditShiftForm((prev) => ({
+      ...prev,
+      breaks: [
+        ...prev.breaks,
+        {
+          id: generateId('break'),
+          startTime: prev.startTime,
+          endTime: '',
+          notes: ''
+        }
+      ]
+    }));
+  };
+
+  const removeEditedBreak = (breakId) => {
+    setEditShiftForm((prev) => ({
+      ...prev,
+      breaks: prev.breaks.filter((shiftBreak) => shiftBreak.id !== breakId)
+    }));
   };
 
   const handleClockIn = async () => {
@@ -344,6 +381,9 @@ const Shifts = () => {
 
     const startTime = dateTimeLocalToIso(editShiftForm.startTime);
     const endTime = dateTimeLocalToIso(editShiftForm.endTime);
+    const normalizedBreaks = [];
+    let totalBreakTime = 0;
+    let hasOpenBreak = false;
 
     if (!startTime) {
       setNotification({ type: 'error', message: 'Selecciona una hora de entrada valida.' });
@@ -355,20 +395,75 @@ const Shifts = () => {
       return;
     }
 
+    for (const shiftBreak of editShiftForm.breaks) {
+      const breakStart = dateTimeLocalToIso(shiftBreak.startTime);
+      const breakEnd = dateTimeLocalToIso(shiftBreak.endTime);
+
+      if (!breakStart) {
+        setNotification({ type: 'error', message: 'Cada break necesita una hora de inicio valida.' });
+        return;
+      }
+
+      if (new Date(breakStart) < new Date(startTime)) {
+        setNotification({ type: 'error', message: 'Un break no puede empezar antes de la entrada.' });
+        return;
+      }
+
+      if (endTime && new Date(breakStart) > new Date(endTime)) {
+        setNotification({ type: 'error', message: 'Un break no puede empezar despues del cierre.' });
+        return;
+      }
+
+      if (breakEnd && new Date(breakEnd) < new Date(breakStart)) {
+        setNotification({ type: 'error', message: 'La salida de un break no puede ser antes de su inicio.' });
+        return;
+      }
+
+      if (breakEnd && endTime && new Date(breakEnd) > new Date(endTime)) {
+        setNotification({ type: 'error', message: 'Un break no puede terminar despues del cierre.' });
+        return;
+      }
+
+      if (!breakEnd) {
+        hasOpenBreak = true;
+      }
+
+      const duration = breakEnd
+        ? Math.max(0, Math.round((new Date(breakEnd) - new Date(breakStart)) / (1000 * 60)))
+        : 0;
+      totalBreakTime += duration;
+
+      normalizedBreaks.push({
+        id: shiftBreak.id || generateId('break'),
+        startTime: breakStart,
+        endTime: breakEnd,
+        duration,
+        notes: shiftBreak.notes || ''
+      });
+    }
+
+    if (endTime && hasOpenBreak) {
+      setNotification({ type: 'error', message: 'Cierra los breaks abiertos antes de guardar un shift completado.' });
+      return;
+    }
+
     const totals = calculateShiftTotals(editShiftTarget, sales, specialOrderPayments, {
       startTime,
-      endTime
+      endTime,
+      totalBreakTime
     });
     const nextStatus = endTime
       ? 'completed'
-      : ['active', 'on_break'].includes(editShiftTarget.status)
-        ? editShiftTarget.status
+      : hasOpenBreak
+        ? 'on_break'
         : 'active';
 
     try {
       await patchShift(editShiftTarget.id, {
         startTime,
         endTime,
+        breaks: normalizedBreaks,
+        totalBreakTime,
         status: nextStatus,
         totalHours: endTime ? Math.max(0, totals.totalHours) : 0,
         totalSales: totals.totalSales,
@@ -642,7 +737,7 @@ const Shifts = () => {
                               className="inline-flex items-center gap-1 text-xs text-indigo-700 hover:underline"
                             >
                               <Edit size={12} />
-                              Editar horas
+                              Editar horas/breaks
                             </button>
                           )}
                         </div>
@@ -695,30 +790,88 @@ const Shifts = () => {
       )}
 
       {editShiftTarget && (
-        <Modal isOpen={Boolean(editShiftTarget)} onClose={closeEditShiftModal} title="Editar horas del shift" size="md">
-          <div className="space-y-4">
+        <Modal isOpen={Boolean(editShiftTarget)} onClose={closeEditShiftModal} title="Editar horas y breaks" size="xl">
+          <div className="space-y-5">
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
               <p className="text-gray-600">Empleado</p>
               <p className="font-semibold text-gray-900">{editShiftTarget.employeeName}</p>
             </div>
 
-            <Input
-              label="Hora de entrada"
-              type="datetime-local"
-              value={editShiftForm.startTime}
-              onChange={(e) => setEditShiftForm((prev) => ({ ...prev, startTime: e.target.value }))}
-              required
-            />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input
+                label="Hora de entrada"
+                type="datetime-local"
+                value={editShiftForm.startTime}
+                onChange={(e) => setEditShiftForm((prev) => ({ ...prev, startTime: e.target.value }))}
+                required
+              />
 
-            <Input
-              label="Hora de cierre"
-              type="datetime-local"
-              value={editShiftForm.endTime}
-              onChange={(e) => setEditShiftForm((prev) => ({ ...prev, endTime: e.target.value }))}
-            />
+              <Input
+                label="Hora de cierre"
+                type="datetime-local"
+                value={editShiftForm.endTime}
+                onChange={(e) => setEditShiftForm((prev) => ({ ...prev, endTime: e.target.value }))}
+              />
+            </div>
+
+            <div className="rounded-lg border border-gray-200">
+              <div className="flex flex-col gap-3 border-b border-gray-200 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="font-semibold text-gray-900">Breaks</h3>
+                  <p className="text-sm text-gray-500">Edita la entrada y salida de cada break.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={addEditedBreak}
+                  className="btn-secondary inline-flex items-center gap-2 self-start sm:self-auto"
+                >
+                  <Plus size={16} />
+                  Agregar break
+                </button>
+              </div>
+
+              <div className="divide-y divide-gray-100">
+                {editShiftForm.breaks.length === 0 ? (
+                  <div className="p-4 text-sm text-gray-500">Este shift no tiene breaks registrados.</div>
+                ) : (
+                  editShiftForm.breaks.map((shiftBreak, index) => (
+                    <div key={shiftBreak.id} className="grid grid-cols-1 gap-4 p-4 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-start">
+                      <Input
+                        label={`Break ${index + 1} inicio`}
+                        type="datetime-local"
+                        value={shiftBreak.startTime}
+                        onChange={(e) => updateEditedBreak(shiftBreak.id, 'startTime', e.target.value)}
+                        required
+                      />
+                      <Input
+                        label={`Break ${index + 1} salida`}
+                        type="datetime-local"
+                        value={shiftBreak.endTime}
+                        onChange={(e) => updateEditedBreak(shiftBreak.id, 'endTime', e.target.value)}
+                      />
+                      <Input
+                        label="Nota"
+                        value={shiftBreak.notes}
+                        onChange={(e) => updateEditedBreak(shiftBreak.id, 'notes', e.target.value)}
+                        placeholder="Opcional"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeEditedBreak(shiftBreak.id)}
+                        className="btn-secondary inline-flex items-center justify-center gap-2 lg:mt-6"
+                        aria-label={`Quitar break ${index + 1}`}
+                      >
+                        <Trash2 size={16} />
+                        Quitar
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
 
             <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-sm text-blue-800">
-              Deja la hora de cierre vacia si el shift debe quedar abierto.
+              Deja la hora de cierre vacia si el shift debe quedar abierto. Un break sin salida deja el shift en break.
             </div>
 
             <div className="flex justify-end gap-2 pt-4">
