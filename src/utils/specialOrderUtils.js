@@ -328,6 +328,14 @@ export const buildSpecialOrderPaymentSale = ({ order, payment }) => {
         price: amount,
         subtotal: amount,
         taxableSubtotal: amount,
+        tax: 0,
+        taxBreakdown: {
+          state: 0,
+          municipal: 0
+        },
+        total: amount,
+        ivuStateEnabled: false,
+        ivuMunicipalEnabled: false,
         discountAmount: 0,
         nonInventory: true,
         isSpecialOrderPayment: true,

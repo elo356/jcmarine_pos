@@ -16,6 +16,7 @@ export const getSaleItemFinancials = (item = {}) => {
   const quantity = Math.max(0, toNumber(item.quantity, 0));
   const unitPrice = toNumber(item.price ?? item.unitPrice, 0);
   const subtotal = roundMoney(item.subtotal ?? (unitPrice * quantity));
+  const isSpecialOrderPayment = item.isSpecialOrderPayment === true;
   const discountType = item.discountType === 'fixed' || item.discount?.type === 'fixed' ? 'fixed' : 'percentage';
   const discountValue = Math.max(0, toNumber(item.discountValue ?? item.discount?.value, 0));
   const storedDiscountAmount = item.discountAmount;
@@ -30,11 +31,17 @@ export const getSaleItemFinancials = (item = {}) => {
     item.taxableSubtotal ?? Math.max(0, subtotal - discountAmount)
   );
   const stateTax = roundMoney(
+    isSpecialOrderPayment
+      ? 0
+      :
     item.taxBreakdown?.state ??
     item.stateTax ??
     ((item.ivuStateEnabled !== false) ? taxableSubtotal * IVU_STATE_RATE : 0)
   );
   const municipalTax = roundMoney(
+    isSpecialOrderPayment
+      ? 0
+      :
     item.taxBreakdown?.municipal ??
     item.municipalTax ??
     ((item.ivuMunicipalEnabled !== false) ? taxableSubtotal * IVU_MUNICIPAL_RATE : 0)
@@ -54,7 +61,7 @@ export const getSaleItemFinancials = (item = {}) => {
       municipal: municipalTax
     },
     tax: roundMoney(stateTax + municipalTax),
-    total: roundMoney(item.total ?? (taxableSubtotal + stateTax + municipalTax))
+    total: roundMoney(item.total ?? (isSpecialOrderPayment ? subtotal : (taxableSubtotal + stateTax + municipalTax)))
   };
 };
 
