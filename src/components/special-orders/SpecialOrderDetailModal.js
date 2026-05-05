@@ -175,7 +175,6 @@ function SpecialOrderDetailModal({
                   <th>Costo</th>
                   <th>Precio</th>
                   <th>Subtotal</th>
-                  <th>IVU</th>
                   <th>Total</th>
                 </tr>
               </thead>
@@ -196,8 +195,7 @@ function SpecialOrderDetailModal({
                     <td>{formatCurrency(item.unitCost || 0)}</td>
                     <td>{formatCurrency(item.unitPrice || 0)}</td>
                     <td>{formatCurrency(item.subtotal || 0)}</td>
-                    <td>{formatCurrency(item.tax || 0)}</td>
-                    <td>{formatCurrency(item.total || 0)}</td>
+                    <td>{formatCurrency(item.subtotal || 0)}</td>
                   </tr>
                 ))}
               </tbody>
