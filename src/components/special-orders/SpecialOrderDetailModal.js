@@ -86,8 +86,26 @@ function SpecialOrderDetailModal({
                 <span>Subtotal</span>
                 <strong>{formatCurrency(order.subtotalAmount || 0)}</strong>
               </div>
+              {(order.discountAmount || 0) > 0 && (
+                <div className="flex justify-between text-green-600">
+                  <span>Descuentos</span>
+                  <strong>-{formatCurrency(order.discountAmount || 0)}</strong>
+                </div>
+              )}
+              {(order.taxBreakdown?.state || 0) > 0 && (
+                <div className="flex justify-between">
+                  <span>IVU estatal</span>
+                  <strong>{formatCurrency(order.taxBreakdown?.state || 0)}</strong>
+                </div>
+              )}
+              {(order.taxBreakdown?.municipal || 0) > 0 && (
+                <div className="flex justify-between">
+                  <span>IVU municipal</span>
+                  <strong>{formatCurrency(order.taxBreakdown?.municipal || 0)}</strong>
+                </div>
+              )}
               <div className="flex justify-between">
-                <span>IVU</span>
+                <span>IVU total</span>
                 <strong>{formatCurrency(order.taxAmount || 0)}</strong>
               </div>
               <div className="flex justify-between">
@@ -167,6 +185,11 @@ function SpecialOrderDetailModal({
                     <td>
                       <div className="font-medium">{item.name}</div>
                       {item.description && <div className="text-xs text-gray-500">{item.description}</div>}
+                      {item.discountAmount > 0 && (
+                        <div className="text-xs text-green-600">
+                          Desc. {item.discountType === 'percentage' ? `${item.discountValue}%` : formatCurrency(item.discountValue)} -{formatCurrency(item.discountAmount)}
+                        </div>
+                      )}
                     </td>
                     <td>{item.sku || 'N/A'}</td>
                     <td>{item.quantity}</td>

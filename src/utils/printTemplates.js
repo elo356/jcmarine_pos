@@ -222,14 +222,23 @@ export const buildSpecialOrderPrintHtml = ({ order, printerName = '' }) => {
         <thead>
           <tr>
             <th>Producto</th>
-            <th>Total</th>
+            <th>Cant.</th>
+            <th>Precio unit.</th>
+            <th>Subtotal</th>
           </tr>
         </thead>
         <tbody>
           ${order.items.map((item) => `
             <tr>
-              <td>${item.name}${item.quantity > 1 ? ` x${item.quantity}` : ''}</td>
-              <td>${formatCurrency(item.total || item.subtotal || 0)}</td>
+              <td>
+                ${item.name}
+                ${item.discountAmount > 0
+                  ? `<div class="muted" style="margin-top:4px;">Descuento ${item.discountType === 'percentage' ? `${item.discountValue}%` : formatCurrency(item.discountValue)}: -${formatCurrency(item.discountAmount)}</div>`
+                  : ''}
+              </td>
+              <td>${formatQuantity(item.quantity, item.unitType || 'unit')}</td>
+              <td>${formatCurrency(item.unitPrice || item.price || 0)}</td>
+              <td>${formatCurrency(item.subtotal || 0)}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -238,7 +247,10 @@ export const buildSpecialOrderPrintHtml = ({ order, printerName = '' }) => {
 
     <div class="totals">
       <div class="row"><span>Subtotal</span><strong>${formatCurrency(order.subtotalAmount || 0)}</strong></div>
-      <div class="row"><span>IVU</span><strong>${formatCurrency(order.taxAmount || 0)}</strong></div>
+      ${order.discountAmount > 0 ? `<div class="row"><span>Descuentos</span><strong>-${formatCurrency(order.discountAmount)}</strong></div>` : ''}
+      ${order.taxBreakdown?.state > 0 ? `<div class="row"><span>IVU estatal</span><strong>${formatCurrency(order.taxBreakdown.state)}</strong></div>` : ''}
+      ${order.taxBreakdown?.municipal > 0 ? `<div class="row"><span>IVU municipal</span><strong>${formatCurrency(order.taxBreakdown.municipal)}</strong></div>` : ''}
+      <div class="row"><span>IVU total</span><strong>${formatCurrency(order.taxAmount || 0)}</strong></div>
       <div class="row"><span>Total</span><strong>${formatCurrency(order.totalAmount)}</strong></div>
       <div class="row"><span>Anticipo</span><strong>${formatCurrency(order.depositAmount)}</strong></div>
       <div class="row"><span>Cobrado</span><strong>${formatCurrency(order.amountPaid)}</strong></div>

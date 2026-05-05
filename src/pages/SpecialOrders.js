@@ -386,18 +386,24 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     const currentUser = getCurrentUserIdentity(user, profile, loadData().currentUser);
     const specialOrderId = generateId('special_order');
     const orderNumber = formatSpecialOrderNumber();
-    const normalizedItems = items.map((item) => ({
-      ...item,
-      id: item.id || generateId('special_order_item'),
-      subtotal: calculateItemPricing(item).subtotal,
-      taxableSubtotal: calculateItemPricing(item).taxableSubtotal,
-      tax: calculateItemPricing(item).totalTax,
-      taxBreakdown: {
-        state: calculateItemPricing(item).stateTax,
-        municipal: calculateItemPricing(item).municipalTax
-      },
-      total: calculateItemPricing(item).total
-    }));
+    const normalizedItems = items.map((item) => {
+      const pricing = calculateItemPricing(item);
+      return {
+        ...item,
+        id: item.id || generateId('special_order_item'),
+        discountType: pricing.discount.type,
+        discountValue: pricing.discount.value,
+        discountAmount: pricing.discountAmount,
+        subtotal: pricing.subtotal,
+        taxableSubtotal: pricing.taxableSubtotal,
+        tax: pricing.totalTax,
+        taxBreakdown: {
+          state: pricing.stateTax,
+          municipal: pricing.municipalTax
+        },
+        total: pricing.total
+      };
+    });
     const subtotalAmount = roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0));
     const taxBreakdown = {
       state: roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.taxBreakdown?.state || 0), 0)),
@@ -521,18 +527,24 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
 
     const currentUser = getCurrentUserIdentity(user, profile, loadData().currentUser);
     const savedCustomer = await createOrReuseCustomer(customer);
-    const normalizedItems = items.map((item) => ({
-      ...item,
-      id: item.id || generateId('special_order_item'),
-      subtotal: calculateItemPricing(item).subtotal,
-      taxableSubtotal: calculateItemPricing(item).taxableSubtotal,
-      tax: calculateItemPricing(item).totalTax,
-      taxBreakdown: {
-        state: calculateItemPricing(item).stateTax,
-        municipal: calculateItemPricing(item).municipalTax
-      },
-      total: calculateItemPricing(item).total
-    }));
+    const normalizedItems = items.map((item) => {
+      const pricing = calculateItemPricing(item);
+      return {
+        ...item,
+        id: item.id || generateId('special_order_item'),
+        discountType: pricing.discount.type,
+        discountValue: pricing.discount.value,
+        discountAmount: pricing.discountAmount,
+        subtotal: pricing.subtotal,
+        taxableSubtotal: pricing.taxableSubtotal,
+        tax: pricing.totalTax,
+        taxBreakdown: {
+          state: pricing.stateTax,
+          municipal: pricing.municipalTax
+        },
+        total: pricing.total
+      };
+    });
     const subtotalAmount = roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0));
     const taxBreakdown = {
       state: roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.taxBreakdown?.state || 0), 0)),

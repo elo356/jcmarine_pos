@@ -54,6 +54,11 @@ const DEFAULT_ITEM = {
   quantity: 1,
   unitCost: 0,
   unitPrice: 0,
+  discount: {
+    type: 'percentage',
+    value: 0
+  },
+  discountAmount: 0,
   subtotal: 0,
   taxableSubtotal: 0,
   tax: 0,
@@ -82,9 +87,19 @@ export const normalizeSpecialOrderItem = (item = {}) => {
   const quantity = Math.max(1, Number(item.quantity || 1));
   const unitCost = Number(item.unitCost || 0);
   const unitPrice = Number(item.unitPrice || 0);
+  const discount = item.discount?.type === 'fixed'
+    ? {
+        type: 'fixed',
+        value: Math.max(0, Number(item.discount?.value || item.discountValue || 0))
+      }
+    : {
+        type: 'percentage',
+        value: Math.max(0, Number(item.discount?.value || item.discountValue || 0))
+      };
   const hasStoredTaxConfig = (
     item.ivuStateEnabled !== undefined ||
     item.ivuMunicipalEnabled !== undefined ||
+    item.discountAmount !== undefined ||
     item.tax !== undefined ||
     item.taxBreakdown !== undefined ||
     item.total !== undefined ||
@@ -95,6 +110,7 @@ export const normalizeSpecialOrderItem = (item = {}) => {
   const pricing = calculateItemPricing({
     quantity,
     unitPrice,
+    discount,
     ivuStateEnabled,
     ivuMunicipalEnabled
   });
@@ -106,6 +122,10 @@ export const normalizeSpecialOrderItem = (item = {}) => {
     quantity,
     unitCost,
     unitPrice,
+    discount,
+    discountType: discount.type,
+    discountValue: discount.value,
+    discountAmount: roundMoney(item.discountAmount ?? pricing.discountAmount),
     subtotal: roundMoney(item.subtotal ?? pricing.subtotal),
     taxableSubtotal: roundMoney(item.taxableSubtotal ?? (hasStoredTaxConfig ? pricing.taxableSubtotal : pricing.subtotal)),
     tax: roundMoney(item.tax ?? (hasStoredTaxConfig ? pricing.totalTax : 0)),
@@ -192,6 +212,9 @@ export const normalizeSpecialOrder = (order = {}) => {
   const subtotalAmount = roundMoney(
     order.subtotalAmount ?? order.subtotal_amount ?? items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
   );
+  const discountAmount = roundMoney(
+    order.discountAmount ?? order.discount_amount ?? order.discount ?? items.reduce((sum, item) => sum + Number(item.discountAmount || 0), 0)
+  );
   const taxBreakdown = {
     state: roundMoney(
       order.taxBreakdown?.state ?? order.tax_breakdown?.state ?? order.taxState ?? order.tax_state ?? items.reduce((sum, item) => sum + Number(item.taxBreakdown?.state || 0), 0)
@@ -202,7 +225,7 @@ export const normalizeSpecialOrder = (order = {}) => {
   };
   const taxAmount = roundMoney(order.taxAmount ?? order.tax_amount ?? order.tax ?? (taxBreakdown.state + taxBreakdown.municipal));
   const totalAmount = roundMoney(
-    order.totalAmount ?? order.total_amount ?? (subtotalAmount + taxAmount)
+    order.totalAmount ?? order.total_amount ?? (Math.max(0, subtotalAmount - discountAmount) + taxAmount)
   );
   const payments = Array.isArray(order.payments) ? order.payments.map(normalizeSpecialOrderPayment) : [];
   const paymentSummary = calculateSpecialOrderPaymentSummary(payments, totalAmount);
@@ -216,6 +239,7 @@ export const normalizeSpecialOrder = (order = {}) => {
     customerEmail: order.customerEmail || order.customer_email || '',
     items,
     subtotalAmount,
+    discountAmount,
     taxAmount,
     taxBreakdown,
     totalAmount,
