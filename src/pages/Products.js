@@ -740,7 +740,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
     const duplicateSku = products.find((p) => {
       if (editingProduct && p.id === editingProduct.id) return false;
-      return getProductSkuReferences(p).includes(normalizedSku);
+      return (p.sku || '').trim().toUpperCase() === normalizedSku;
     });
 
     if (duplicateSku) {

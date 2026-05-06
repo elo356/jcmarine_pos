@@ -169,7 +169,7 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
         case 'canceled':
           return order.orderStatus === SPECIAL_ORDER_STATUS.canceled;
         default:
-          return true;
+          return order.orderStatus !== SPECIAL_ORDER_STATUS.canceled;
       }
     })();
 
