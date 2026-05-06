@@ -79,8 +79,9 @@ function SpecialOrderForm({
     });
   }, [activeProducts, itemSearchQuery, selectedCategory]);
 
+  // Total for the special order should be the sum of line amounts WITHOUT IVU (tax).
   const totalAmount = useMemo(
-    () => roundMoney(items.reduce((sum, item) => sum + calculateItemPricing(item).total, 0)),
+    () => roundMoney(items.reduce((sum, item) => sum + calculateItemPricing(item).taxableSubtotal, 0)),
     [items]
   );
   const subtotalAmount = useMemo(
@@ -519,7 +520,7 @@ function SpecialOrderForm({
                         </div>
                         <div className="rounded-lg bg-white px-3 py-2 border border-gray-200">
                           <p className="text-xs text-gray-500">Total</p>
-                          <p className="font-semibold text-gray-900">{formatCurrency(pricing.total)}</p>
+                          <p className="font-semibold text-gray-900">{formatCurrency(pricing.taxableSubtotal)}</p>
                         </div>
                       </div>
 

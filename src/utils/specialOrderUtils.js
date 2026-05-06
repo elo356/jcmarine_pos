@@ -127,13 +127,14 @@ export const normalizeSpecialOrderItem = (item = {}) => {
     discountValue: discount.value,
     discountAmount: roundMoney(item.discountAmount ?? pricing.discountAmount),
     subtotal: roundMoney(item.subtotal ?? pricing.subtotal),
-    taxableSubtotal: roundMoney(item.taxableSubtotal ?? (hasStoredTaxConfig ? pricing.taxableSubtotal : pricing.subtotal)),
-    tax: roundMoney(item.tax ?? (hasStoredTaxConfig ? pricing.totalTax : 0)),
+    taxableSubtotal: roundMoney(item.taxableSubtotal ?? pricing.taxableSubtotal),
+    tax: roundMoney(item.tax ?? pricing.totalTax),
     taxBreakdown: {
-      state: roundMoney(item.taxBreakdown?.state ?? item.stateTax ?? (hasStoredTaxConfig ? pricing.stateTax : 0)),
-      municipal: roundMoney(item.taxBreakdown?.municipal ?? item.municipalTax ?? (hasStoredTaxConfig ? pricing.municipalTax : 0))
+      state: roundMoney(item.taxBreakdown?.state ?? item.stateTax ?? pricing.stateTax),
+      municipal: roundMoney(item.taxBreakdown?.municipal ?? item.municipalTax ?? pricing.municipalTax)
     },
-    total: roundMoney(item.total ?? (hasStoredTaxConfig ? pricing.total : pricing.subtotal)),
+    // `total` for special orders should represent the line amount WITHOUT IVU (tax)
+    total: roundMoney(item.total ?? pricing.taxableSubtotal),
     ivuStateEnabled,
     ivuMunicipalEnabled
   };
@@ -224,8 +225,9 @@ export const normalizeSpecialOrder = (order = {}) => {
     )
   };
   const taxAmount = roundMoney(order.taxAmount ?? order.tax_amount ?? order.tax ?? (taxBreakdown.state + taxBreakdown.municipal));
+  // totalAmount represents the order total WITHOUT IVU; taxAmount is shown/charged separately
   const totalAmount = roundMoney(
-    order.totalAmount ?? order.total_amount ?? (Math.max(0, subtotalAmount - discountAmount) + taxAmount)
+    order.totalAmount ?? order.total_amount ?? Math.max(0, subtotalAmount - discountAmount)
   );
   const payments = Array.isArray(order.payments) ? order.payments.map(normalizeSpecialOrderPayment) : [];
   const paymentSummary = calculateSpecialOrderPaymentSummary(payments, totalAmount);

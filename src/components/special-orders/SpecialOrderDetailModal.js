@@ -110,7 +110,7 @@ function SpecialOrderDetailModal({
               </div>
               <div className="flex justify-between">
                 <span>Total</span>
-                <strong>{formatCurrency(order.totalAmount)}</strong>
+                <strong>{formatCurrency((order.totalAmount || 0) + (order.taxAmount || 0))}</strong>
               </div>
               <div className="flex justify-between">
                 <span>Cobrado</span>
@@ -195,7 +195,7 @@ function SpecialOrderDetailModal({
                     <td>{formatCurrency(item.unitCost || 0)}</td>
                     <td>{formatCurrency(item.unitPrice || 0)}</td>
                     <td>{formatCurrency(item.subtotal || 0)}</td>
-                    <td>{formatCurrency(item.subtotal || 0)}</td>
+                    <td>{formatCurrency(item.total ?? item.taxableSubtotal ?? 0)}</td>
                   </tr>
                 ))}
               </tbody>

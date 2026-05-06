@@ -238,7 +238,7 @@ export const buildSpecialOrderPrintHtml = ({ order, printerName = '' }) => {
               </td>
               <td>${formatQuantity(item.quantity, item.unitType || 'unit')}</td>
               <td>${formatCurrency(item.unitPrice || item.price || 0)}</td>
-              <td>${formatCurrency(item.subtotal || 0)}</td>
+              <td>${formatCurrency(item.taxableSubtotal || 0)}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -251,7 +251,7 @@ export const buildSpecialOrderPrintHtml = ({ order, printerName = '' }) => {
       ${order.taxBreakdown?.state > 0 ? `<div class="row"><span>IVU estatal</span><strong>${formatCurrency(order.taxBreakdown.state)}</strong></div>` : ''}
       ${order.taxBreakdown?.municipal > 0 ? `<div class="row"><span>IVU municipal</span><strong>${formatCurrency(order.taxBreakdown.municipal)}</strong></div>` : ''}
       <div class="row"><span>IVU total</span><strong>${formatCurrency(order.taxAmount || 0)}</strong></div>
-      <div class="row"><span>Total</span><strong>${formatCurrency(order.totalAmount)}</strong></div>
+      <div class="row"><span>Total</span><strong>${formatCurrency((order.totalAmount || 0) + (order.taxAmount || 0))}</strong></div>
       <div class="row"><span>Anticipo</span><strong>${formatCurrency(order.depositAmount)}</strong></div>
       <div class="row"><span>Cobrado</span><strong>${formatCurrency(order.amountPaid)}</strong></div>
       <div class="row"><span>Balance</span><strong>${formatCurrency(order.balanceDue)}</strong></div>
