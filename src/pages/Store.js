@@ -234,6 +234,11 @@ const StorePage = () => {
         .reduce((sum, sale) => sum + getSaleTenderTotalByMethod(sale, PAYMENT_METHODS.card), 0) +
       getStandaloneSpecialOrderPaymentNet(standalonePayments, sales, (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.card)
     );
+    const paypalPayments = roundMoney(
+      paidSales
+        .reduce((sum, sale) => sum + getSaleTenderTotalByMethod(sale, PAYMENT_METHODS.paypal), 0) +
+      getStandaloneSpecialOrderPaymentNet(standalonePayments, sales, (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.paypal)
+    );
     const cashRefunds = roundMoney(
       sales.reduce((sum, sale) => sum + getSaleRefundTotalFrom(sale, openedAtMs, PAYMENT_METHODS.cash), 0)
     );
@@ -267,7 +272,8 @@ const StorePage = () => {
       tenders: {
         cash: cashPayments,
         athMovil: athMovilPayments,
-        card: cardPayments
+        card: cardPayments,
+        paypal: paypalPayments
       }
     };
   }, [activeSessionSales, activeStoreSession, closeForm.actualCashAmount, closeForm.paidIn, closeForm.paidOut, currentEmployee?.name, profile?.name, sales, specialOrderPayments, user?.email]);
@@ -470,7 +476,8 @@ const StorePage = () => {
       tenders: {
         cash: roundMoney(log.summary?.sales?.cash ?? 0),
         athMovil: roundMoney(log.summary?.sales?.athMovil ?? 0),
-        card: roundMoney(log.summary?.sales?.card ?? 0)
+        card: roundMoney(log.summary?.sales?.card ?? 0),
+        paypal: roundMoney(log.summary?.sales?.paypal ?? 0)
       }
     };
   }, []);
@@ -583,7 +590,8 @@ const StorePage = () => {
           totalTendered: closeSummary.totalTendered,
           cash: closeSummary.tenders.cash,
           athMovil: closeSummary.tenders.athMovil,
-          card: closeSummary.tenders.card
+          card: closeSummary.tenders.card,
+          paypal: closeSummary.tenders.paypal
         }
       },
       source: 'store'
@@ -999,6 +1007,7 @@ const StorePage = () => {
                   <div className="flex justify-between"><span>Cash</span><strong>{formatCurrency(closeSummary.tenders.cash)}</strong></div>
                   <div className="flex justify-between"><span>ATH Móvil</span><strong>{formatCurrency(closeSummary.tenders.athMovil)}</strong></div>
                   <div className="flex justify-between"><span>Tarjeta</span><strong>{formatCurrency(closeSummary.tenders.card)}</strong></div>
+                  <div className="flex justify-between"><span>PayPal</span><strong>{formatCurrency(closeSummary.tenders.paypal)}</strong></div>
                 </div>
               </div>
             </div>

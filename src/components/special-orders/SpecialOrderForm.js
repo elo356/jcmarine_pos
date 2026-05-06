@@ -569,7 +569,8 @@ function SpecialOrderForm({
             options={[
               { value: 'cash', label: 'Efectivo' },
               { value: 'card', label: 'Tarjeta' },
-              { value: 'ath_movil', label: 'ATH Móvil' }
+              { value: 'ath_movil', label: 'ATH Móvil' },
+              { value: 'paypal', label: 'PayPal' }
             ]}
           />
         </div>

@@ -2,6 +2,7 @@ export const PAYMENT_METHODS = {
   cash: 'cash',
   card: 'card',
   athMovil: 'ath_movil',
+  paypal: 'paypal',
   split: 'split'
 };
 
@@ -22,6 +23,8 @@ export const getPaymentMethodLabel = (method) => {
       return 'Tarjeta';
     case PAYMENT_METHODS.athMovil:
       return 'ATH Móvil';
+    case PAYMENT_METHODS.paypal:
+      return 'PayPal';
     case PAYMENT_METHODS.split:
       return 'Split';
     default:

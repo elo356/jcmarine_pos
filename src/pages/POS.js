@@ -1184,6 +1184,27 @@ function POS({
     );
   };
 
+  const handlePaypalPayment = async () => {
+    const transactionId = generateId('sale');
+    const paymentEntries = [
+      buildPaymentEntry({
+        transactionId,
+        method: PAYMENT_METHODS.paypal,
+        amount: total,
+        confirmedBy: currentOperator.name,
+        reference: paymentReference
+      })
+    ];
+
+    await finalizePayment(
+      paymentEntries,
+      {
+        successMessage: 'Pago por PayPal confirmado y transaccion guardada.',
+        warningMessage: 'Pago por PayPal confirmado localmente, pero fallo la sincronizacion con Firestore.'
+      }
+    );
+  };
+
   const updateSplitPayment = (index, field, value) => {
     setSplitPayments((current) => current.map((payment, paymentIndex) => {
       if (paymentIndex !== index) return payment;
@@ -1806,6 +1827,14 @@ function POS({
                   <p className="font-medium">ATH Móvil</p>
                 </button>
                 <button
+                  onClick={() => setSelectedPaymentMethod(PAYMENT_METHODS.paypal)}
+                  className="card p-6 hover:bg-sky-50 hover:border-sky-300 text-center transition-colors"
+                  disabled={Boolean(checkoutBlockReason)}
+                >
+                  <CreditCard size={32} className="mx-auto mb-2 text-sky-600" />
+                  <p className="font-medium">PayPal</p>
+                </button>
+                <button
                   onClick={() => {
                     setSplitPayments([
                       { ...DEFAULT_SPLIT_PAYMENT, method: PAYMENT_METHODS.cash },
@@ -2010,6 +2039,43 @@ function POS({
             </div>
           )}
 
+          {selectedPaymentMethod === PAYMENT_METHODS.paypal && (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-sky-200 bg-sky-50 p-4">
+                <p className="font-medium text-sky-800">Pidele al cliente que complete el pago por PayPal.</p>
+                <p className="text-sm text-sky-700">Verifica el pago en la cuenta del negocio antes de confirmarlo aqui.</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Referencia (opcional)</label>
+                <input
+                  type="text"
+                  value={paymentReference}
+                  onChange={(e) => setPaymentReference(e.target.value)}
+                  className="input w-full"
+                  placeholder="ID de transaccion o nota de PayPal"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedPaymentMethod('')}
+                  className="flex-1 btn btn-secondary"
+                  disabled={isProcessingPayment}
+                >
+                  Atras
+                </button>
+                <button
+                  onClick={handlePaypalPayment}
+                  className="flex-1 btn btn-primary"
+                  disabled={isProcessingPayment || Boolean(checkoutBlockReason)}
+                >
+                  Confirmar pago PayPal
+                </button>
+              </div>
+            </div>
+          )}
+
           {selectedPaymentMethod === PAYMENT_METHODS.split && (
             <div className="space-y-4">
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
@@ -2050,6 +2116,7 @@ function POS({
                           <option value={PAYMENT_METHODS.cash}>Efectivo</option>
                           <option value={PAYMENT_METHODS.card}>Tarjeta</option>
                           <option value={PAYMENT_METHODS.athMovil}>ATH MÃ³vil</option>
+                          <option value={PAYMENT_METHODS.paypal}>PayPal</option>
                         </select>
                       </div>
 
