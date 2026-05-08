@@ -401,7 +401,7 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
           state: pricing.stateTax,
           municipal: pricing.municipalTax
         },
-        total: pricing.taxableSubtotal
+        total: pricing.total
       };
     });
     const subtotalAmount = roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0));
@@ -542,7 +542,7 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
           state: pricing.stateTax,
           municipal: pricing.municipalTax
         },
-        total: pricing.taxableSubtotal
+        total: pricing.total
       };
     });
     const subtotalAmount = roundMoney(normalizedItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0));
