@@ -79,9 +79,9 @@ function SpecialOrderForm({
     });
   }, [activeProducts, itemSearchQuery, selectedCategory]);
 
-  // Total for the special order should be the sum of line amounts WITHOUT IVU (tax).
+  // Total for the special order should be the sum of line amounts WITH IVU (tax).
   const totalAmount = useMemo(
-    () => roundMoney(items.reduce((sum, item) => sum + calculateItemPricing(item).taxableSubtotal, 0)),
+    () => roundMoney(items.reduce((sum, item) => sum + calculateItemPricing(item).total, 0)),
     [items]
   );
   const subtotalAmount = useMemo(
