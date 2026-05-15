@@ -51,6 +51,18 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    match /onlineOrders/{orderId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+
+    match /onlineStoreSettings/{docId} {
+      allow read: if isSignedIn();
+      allow create, update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
     match /payments/{paymentId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();

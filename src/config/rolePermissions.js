@@ -8,6 +8,7 @@ export const MODULE_PERMISSION_OPTIONS = [
   { id: 'inventory', label: 'Inventario' },
   { id: 'shifts', label: 'Turnos' },
   { id: 'store', label: 'Tienda' },
+  { id: 'online_store', label: 'Tienda online' },
   { id: 'finance', label: 'Gastos y facturas' },
   { id: 'employees', label: 'Empleados' },
   { id: 'reports', label: 'Reportes' },
@@ -39,6 +40,7 @@ export const DEFAULT_ROLE_DEFINITIONS = [
       'inventory',
       'shifts',
       'store',
+      'online_store',
       'finance',
       'reports',
       'printers',
@@ -58,6 +60,7 @@ export const DEFAULT_ROLE_DEFINITIONS = [
       'inventory',
       'shifts',
       'store',
+      'online_store',
       'finance'
     ],
     system: true
@@ -74,6 +77,7 @@ export const PAGE_PERMISSION_IDS = [
   'inventory',
   'shifts',
   'store',
+  'online_store',
   'finance',
   'employees',
   'reports',

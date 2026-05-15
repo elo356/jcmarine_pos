@@ -7,6 +7,7 @@ import {
   Warehouse,
   Clock,
   Store,
+  Globe2,
   Users,
   BarChart3,
   Printer,
@@ -26,6 +27,7 @@ import Notes from './pages/Notes';
 import Inventory from './pages/Inventory';
 import Shifts from './pages/Shifts';
 import StorePage from './pages/Store';
+import OnlineStore from './pages/OnlineStore';
 import Employees from './pages/Employees';
 import Reports from './pages/Reports';
 import Printers from './pages/Printers';
@@ -49,6 +51,7 @@ const SIDEBAR_ITEMS = [
   { id: 'inventory', label: 'Inventario', icon: Warehouse },
   { id: 'shifts', label: 'Turnos', icon: Clock },
   { id: 'store', label: 'Tienda', icon: Store },
+  { id: 'online_store', label: 'Tienda online', icon: Globe2 },
   { id: 'finance', label: 'Gastos y facturas', icon: FileText },
   { id: 'employees', label: 'Empleados', icon: Users },
   { id: 'reports', label: 'Reportes', icon: BarChart3 },
@@ -74,7 +77,9 @@ function App() {
     () => SIDEBAR_ITEMS.filter((item) => {
       const hasAccess = item.id === 'store'
         ? allowedPages.includes('store') || allowedPages.includes('shifts')
-        : allowedPages.includes(item.id);
+        : item.id === 'online_store'
+          ? allowedPages.includes('online_store') || allowedPages.includes('store')
+          : allowedPages.includes(item.id);
       return hasAccess && (!item.adminOnly || profile?.role === 'admin');
     }),
     [allowedPages, profile?.role]
@@ -83,6 +88,8 @@ function App() {
   useEffect(() => {
     const hasAccessToCurrentPage = currentPage === 'store'
       ? allowedPages.includes('store') || allowedPages.includes('shifts')
+      : currentPage === 'online_store'
+        ? allowedPages.includes('online_store') || allowedPages.includes('store')
       : allowedPages.includes(currentPage);
     if (!hasAccessToCurrentPage) {
       setCurrentPage(allowedPages[0] || 'dashboard');
@@ -145,6 +152,8 @@ function App() {
         return <Shifts />;
       case 'store':
         return <StorePage />;
+      case 'online_store':
+        return <OnlineStore />;
       case 'finance':
         return <FinancePage />;
       case 'employees':

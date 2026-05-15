@@ -499,7 +499,7 @@ const Reports = () => {
                   today: 'Hoy',
                   week: 'Semana',
                   month: 'Mes',
-                  year: 'Ano'
+                  year: 'Año'
                 }[range]}
               </button>
             ))}
