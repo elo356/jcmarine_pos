@@ -1669,6 +1669,12 @@ function POS({
                       <span>-{formatCurrency(discountAmount)}</span>
                     </div>
                   )}
+                  {discountAmount > 0 && (
+                    <div className="flex justify-between text-gray-600">
+                      <span>Subtotal neto:</span>
+                      <span>{formatCurrency(Math.max(0, subtotal - discountAmount))}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-gray-600">
                     <span>IVU Estatal (10.5%):</span>
                     <span>{formatCurrency(taxSummary.state)}</span>
@@ -1676,10 +1682,6 @@ function POS({
                   <div className="flex justify-between text-gray-600">
                     <span>IVU Municipal (1%):</span>
                     <span>{formatCurrency(taxSummary.municipal)}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-600">
-                    <span>IVU Total:</span>
-                    <span>{formatCurrency(tax)}</span>
                   </div>
                   <div className="flex justify-between text-xl font-bold pt-2 border-t">
                     <span>Total:</span>
@@ -2536,6 +2538,12 @@ function POS({
                   <span>-{formatCurrency(lastSaleSummary?.discount ?? lastSale.discount)}</span>
                 </div>
               )}
+              {(lastSaleSummary?.discount ?? lastSale.discount) > 0 && (
+                <div className="flex justify-between">
+                  <span>Subtotal neto:</span>
+                  <span>{formatCurrency(Math.max(0, (lastSaleSummary?.subtotal ?? lastSale.subtotal ?? 0) - (lastSaleSummary?.discount ?? lastSale.discount ?? 0)))}</span>
+                </div>
+              )}
               {(lastSaleSummary?.taxBreakdown?.state ?? lastSale.taxBreakdown?.state ?? 0) > 0 && (
                 <div className="flex justify-between">
                   <span>IVU Estatal (10.5%):</span>
@@ -2548,10 +2556,6 @@ function POS({
                   <span>{formatCurrency((lastSaleSummary?.taxBreakdown?.municipal ?? lastSale.taxBreakdown?.municipal) || 0)}</span>
                 </div>
               )}
-              <div className="flex justify-between">
-                <span>IVU Total:</span>
-                <span>{formatCurrency(lastSale.tax)}</span>
-              </div>
               <div className="flex justify-between text-lg font-bold pt-2 border-t">
                 <span>Total:</span>
                 <span className="text-green-600">{formatCurrency(lastSaleSummary?.total ?? lastSale.total)}</span>

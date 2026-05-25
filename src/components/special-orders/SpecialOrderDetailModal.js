@@ -4,6 +4,7 @@ import Modal from '../Modal';
 import { formatCurrency, formatDateTime, loadData, normalizePrintSettings } from '../../data/demoData';
 import {
   canDeliverSpecialOrder,
+  getSpecialOrderFinancialSummary,
   getSpecialOrderPaymentStatusBadge,
   getSpecialOrderPaymentStatusLabel,
   getSpecialOrderStatusBadge,
@@ -29,6 +30,7 @@ function SpecialOrderDetailModal({
   onCancel
 }) {
   if (!order) return null;
+  const financialSummary = getSpecialOrderFinancialSummary(order);
 
   const handlePrint = async () => {
     const data = loadData();
@@ -84,33 +86,41 @@ function SpecialOrderDetailModal({
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span>Subtotal</span>
-                <strong>{formatCurrency(order.subtotalAmount || 0)}</strong>
+                <strong>{formatCurrency(financialSummary.subtotal)}</strong>
               </div>
-              {(order.discountAmount || 0) > 0 && (
+              {financialSummary.discount > 0 && (
                 <div className="flex justify-between text-green-600">
                   <span>Descuentos</span>
-                  <strong>-{formatCurrency(order.discountAmount || 0)}</strong>
+                  <strong>-{formatCurrency(financialSummary.discount)}</strong>
                 </div>
               )}
-              {(order.taxBreakdown?.state || 0) > 0 && (
+              {financialSummary.discount > 0 && (
+                <div className="flex justify-between">
+                  <span>Subtotal neto</span>
+                  <strong>{formatCurrency(financialSummary.taxableSubtotal)}</strong>
+                </div>
+              )}
+              {(financialSummary.taxBreakdown.state || 0) > 0 && (
                 <div className="flex justify-between">
                   <span>IVU estatal</span>
-                  <strong>{formatCurrency(order.taxBreakdown?.state || 0)}</strong>
+                  <strong>{formatCurrency(financialSummary.taxBreakdown.state || 0)}</strong>
                 </div>
               )}
-              {(order.taxBreakdown?.municipal || 0) > 0 && (
+              {(financialSummary.taxBreakdown.municipal || 0) > 0 && (
                 <div className="flex justify-between">
                   <span>IVU municipal</span>
-                  <strong>{formatCurrency(order.taxBreakdown?.municipal || 0)}</strong>
+                  <strong>{formatCurrency(financialSummary.taxBreakdown.municipal || 0)}</strong>
+                </div>
+              )}
+              {financialSummary.taxBreakdown.state <= 0 && financialSummary.taxBreakdown.municipal <= 0 && financialSummary.tax > 0 && (
+                <div className="flex justify-between">
+                  <span>IVU</span>
+                  <strong>{formatCurrency(financialSummary.tax)}</strong>
                 </div>
               )}
               <div className="flex justify-between">
-                <span>IVU total</span>
-                <strong>{formatCurrency(order.taxAmount || 0)}</strong>
-              </div>
-              <div className="flex justify-between">
                 <span>Total</span>
-                <strong>{formatCurrency((order.totalAmount || 0) + (order.taxAmount || 0))}</strong>
+                <strong>{formatCurrency(financialSummary.total)}</strong>
               </div>
               <div className="flex justify-between">
                 <span>Cobrado</span>

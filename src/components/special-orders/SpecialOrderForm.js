@@ -105,7 +105,6 @@ function SpecialOrderForm({
     }),
     [taxSummary]
   );
-  const taxAmount = roundMoney(roundedTaxSummary.state + roundedTaxSummary.municipal);
   const discountAmount = useMemo(
     () => roundMoney(items.reduce((sum, item) => sum + calculateItemPricing(item).discountAmount, 0)),
     [items]
@@ -602,6 +601,12 @@ function SpecialOrderForm({
               <strong>-{formatCurrency(discountAmount)}</strong>
             </div>
           )}
+          {discountAmount > 0 && (
+            <div className="flex justify-between">
+              <span>Subtotal neto</span>
+              <strong>{formatCurrency(Math.max(0, subtotalAmount - discountAmount))}</strong>
+            </div>
+          )}
           <div className="flex justify-between">
             <span>IVU estatal</span>
             <strong>{formatCurrency(roundedTaxSummary.state)}</strong>
@@ -609,10 +614,6 @@ function SpecialOrderForm({
           <div className="flex justify-between">
             <span>IVU municipal</span>
             <strong>{formatCurrency(roundedTaxSummary.municipal)}</strong>
-          </div>
-          <div className="flex justify-between">
-            <span>IVU total</span>
-            <strong>{formatCurrency(taxAmount)}</strong>
           </div>
           <div className="flex justify-between text-base text-gray-900">
             <span>Total del pedido</span>

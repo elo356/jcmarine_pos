@@ -194,32 +194,73 @@ export const calculateSpecialOrderPaymentSummary = (payments = [], totalAmount =
   };
 };
 
+export const getSpecialOrderFinancialSummary = (order = {}) => {
+  const items = Array.isArray(order.items) ? order.items.map(normalizeSpecialOrderItem) : [];
+  const itemSubtotal = roundMoney(items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0));
+  const itemDiscount = roundMoney(items.reduce((sum, item) => sum + Number(item.discountAmount || 0), 0));
+  const itemTaxBreakdown = {
+    state: roundMoney(items.reduce((sum, item) => sum + Number(item.taxBreakdown?.state || 0), 0)),
+    municipal: roundMoney(items.reduce((sum, item) => sum + Number(item.taxBreakdown?.municipal || 0), 0))
+  };
+  const subtotal = roundMoney(
+    items.length > 0 ? itemSubtotal : (order.subtotalAmount ?? order.subtotal_amount ?? 0)
+  );
+  const discount = roundMoney(
+    items.length > 0 ? itemDiscount : (order.discountAmount ?? order.discount_amount ?? order.discount ?? 0)
+  );
+  const taxableSubtotal = roundMoney(
+    items.reduce((sum, item) => sum + Number(item.taxableSubtotal ?? item.total ?? 0), 0) ||
+    Math.max(0, subtotal - discount)
+  );
+  const taxBreakdown = {
+    state: roundMoney(
+      items.length > 0 ? itemTaxBreakdown.state : (order.taxBreakdown?.state ?? order.tax_breakdown?.state ?? order.taxState ?? order.tax_state ?? 0)
+    ),
+    municipal: roundMoney(
+      items.length > 0 ? itemTaxBreakdown.municipal : (order.taxBreakdown?.municipal ?? order.tax_breakdown?.municipal ?? order.taxMunicipal ?? order.tax_municipal ?? 0)
+    )
+  };
+  const tax = roundMoney(items.length > 0 ? (taxBreakdown.state + taxBreakdown.municipal) : (order.taxAmount ?? order.tax_amount ?? order.tax ?? (taxBreakdown.state + taxBreakdown.municipal)));
+  const computedGrandTotal = roundMoney(taxableSubtotal + tax);
+  const storedTotal = roundMoney(order.totalAmount ?? order.total_amount ?? computedGrandTotal);
+  const storedBalance = roundMoney(order.balanceDue ?? order.balance_due ?? 0);
+  const storedPaid = roundMoney(order.amountPaid ?? order.amount_paid ?? 0);
+  const wasAlreadySettled = storedBalance <= 0.02 && storedPaid >= storedTotal - 0.02;
+  const legacySettledWithoutTax = Math.abs(storedTotal - taxableSubtotal) <= 0.02 && tax > 0 && wasAlreadySettled;
+  const total = legacySettledWithoutTax ? storedTotal : (
+    Math.abs(storedTotal - taxableSubtotal) <= 0.02 && tax > 0
+      ? computedGrandTotal
+      : storedTotal
+  );
+  const displayedTaxBreakdown = legacySettledWithoutTax
+    ? { state: 0, municipal: 0 }
+    : taxBreakdown;
+  const displayedTax = legacySettledWithoutTax ? 0 : tax;
+
+  return {
+    items,
+    subtotal,
+    discount,
+    taxableSubtotal,
+    tax: displayedTax,
+    taxBreakdown: displayedTaxBreakdown,
+    total
+  };
+};
+
 export const normalizeSpecialOrderStatus = (status) =>
   Object.values(SPECIAL_ORDER_STATUS).includes(status)
     ? status
     : SPECIAL_ORDER_STATUS.pending_order;
 
 export const normalizeSpecialOrder = (order = {}) => {
-  const items = Array.isArray(order.items) ? order.items.map(normalizeSpecialOrderItem) : [];
-  const subtotalAmount = roundMoney(
-    order.subtotalAmount ?? order.subtotal_amount ?? items.reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
-  );
-  const discountAmount = roundMoney(
-    order.discountAmount ?? order.discount_amount ?? order.discount ?? items.reduce((sum, item) => sum + Number(item.discountAmount || 0), 0)
-  );
-  const taxBreakdown = {
-    state: roundMoney(
-      order.taxBreakdown?.state ?? order.tax_breakdown?.state ?? order.taxState ?? order.tax_state ?? items.reduce((sum, item) => sum + Number(item.taxBreakdown?.state || 0), 0)
-    ),
-    municipal: roundMoney(
-      order.taxBreakdown?.municipal ?? order.tax_breakdown?.municipal ?? order.taxMunicipal ?? order.tax_municipal ?? items.reduce((sum, item) => sum + Number(item.taxBreakdown?.municipal || 0), 0)
-    )
-  };
-  const taxAmount = roundMoney(order.taxAmount ?? order.tax_amount ?? order.tax ?? (taxBreakdown.state + taxBreakdown.municipal));
-  // totalAmount represents the order total WITHOUT IVU; taxAmount is shown/charged separately
-  const totalAmount = roundMoney(
-    order.totalAmount ?? order.total_amount ?? Math.max(0, subtotalAmount - discountAmount)
-  );
+  const financialSummary = getSpecialOrderFinancialSummary(order);
+  const items = financialSummary.items;
+  const subtotalAmount = financialSummary.subtotal;
+  const discountAmount = financialSummary.discount;
+  const taxBreakdown = financialSummary.taxBreakdown;
+  const taxAmount = financialSummary.tax;
+  const totalAmount = financialSummary.total;
   const payments = Array.isArray(order.payments) ? order.payments.map(normalizeSpecialOrderPayment) : [];
   const paymentSummary = calculateSpecialOrderPaymentSummary(payments, totalAmount);
 

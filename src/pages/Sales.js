@@ -1213,13 +1213,18 @@ function Sales() {
                   {(selectedSaleSummary?.discount || 0) > 0 && (
                     <div className="flex justify-between text-green-600"><span>Descuento</span><strong>-{formatCurrency(selectedSaleSummary?.discount || 0)}</strong></div>
                   )}
+                  {(selectedSaleSummary?.discount || 0) > 0 && (
+                    <div className="flex justify-between"><span>Subtotal neto</span><strong>{formatCurrency(Math.max(0, (selectedSaleSummary?.subtotal || 0) - (selectedSaleSummary?.discount || 0)))}</strong></div>
+                  )}
                   {(selectedSaleSummary?.taxBreakdown?.state || 0) > 0 && (
                     <div className="flex justify-between"><span>IVU estatal</span><strong>{formatCurrency(selectedSaleSummary?.taxBreakdown?.state || 0)}</strong></div>
                   )}
                   {(selectedSaleSummary?.taxBreakdown?.municipal || 0) > 0 && (
                     <div className="flex justify-between"><span>IVU municipal</span><strong>{formatCurrency(selectedSaleSummary?.taxBreakdown?.municipal || 0)}</strong></div>
                   )}
-                  <div className="flex justify-between"><span>IVU</span><strong>{formatCurrency(selectedSaleSummary?.tax || 0)}</strong></div>
+                  {(selectedSaleSummary?.taxBreakdown?.state || 0) <= 0 && (selectedSaleSummary?.taxBreakdown?.municipal || 0) <= 0 && (selectedSaleSummary?.tax || 0) > 0 && (
+                    <div className="flex justify-between"><span>IVU</span><strong>{formatCurrency(selectedSaleSummary?.tax || 0)}</strong></div>
+                  )}
                   <div className="flex justify-between"><span>Total</span><strong>{formatCurrency(selectedSaleSummary?.total || 0)}</strong></div>
                   <div className="flex justify-between"><span>Refunds</span><strong className="text-red-600">-{formatCurrency(getSaleRefundTotal(selectedSale))}</strong></div>
                   <div className="flex justify-between"><span>Neto</span><strong className="text-emerald-700">{formatCurrency(getNetSaleTotal(selectedSale))}</strong></div>

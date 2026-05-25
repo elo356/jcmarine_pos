@@ -176,8 +176,11 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     const matchesDate = !filterDate || String(order.createdAt || '').startsWith(filterDate) || String(order.expectedDate || '').startsWith(filterDate);
     const matchesBalance = !showBalanceOnly || Number(order.balanceDue || 0) > 0;
     const archived = isSpecialOrderArchived(order);
+    const shouldShowArchivedInMainList = selectedTab === 'delivered';
 
-    return matchesQuery && matchesTab && matchesDate && matchesBalance && (includeArchived ? archived : !archived);
+    return matchesQuery && matchesTab && matchesDate && matchesBalance && (
+      includeArchived ? archived : (!archived || shouldShowArchivedInMainList)
+    );
   }, [filterDate, searchQuery, selectedTab, showBalanceOnly]);
 
   const filteredOrders = useMemo(

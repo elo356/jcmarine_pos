@@ -1,5 +1,5 @@
 import { loadData, saveData } from '../../data/demoData';
-import { normalizeSpecialOrder, calculateSpecialOrderPaymentSummary } from '../specialOrderUtils';
+import { normalizeSpecialOrder, calculateSpecialOrderPaymentSummary, getSpecialOrderFinancialSummary } from '../specialOrderUtils';
 
 // Script de migración (ejecutar en la consola del navegador o importar y llamar desde el app)
 export const migrateSpecialOrdersTaxFormat = () => {
@@ -18,12 +18,12 @@ export const migrateSpecialOrdersTaxFormat = () => {
   const migrated = rawOrders.map((order) => {
     const normalized = normalizeSpecialOrder(order);
 
-    const subtotalAmount = normalized.subtotalAmount;
-    const discountAmount = normalized.discountAmount;
-    const taxAmount = normalized.taxAmount;
-    const taxBreakdown = normalized.taxBreakdown;
-
-    const totalAmount = Math.max(0, subtotalAmount - discountAmount); // SIN IVU
+    const financialSummary = getSpecialOrderFinancialSummary(normalized);
+    const subtotalAmount = financialSummary.subtotal;
+    const discountAmount = financialSummary.discount;
+    const taxAmount = financialSummary.tax;
+    const taxBreakdown = financialSummary.taxBreakdown;
+    const totalAmount = financialSummary.total;
 
     const paymentSummary = calculateSpecialOrderPaymentSummary(normalized.payments || [], totalAmount);
 

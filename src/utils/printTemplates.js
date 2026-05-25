@@ -1,6 +1,7 @@
 import { formatCurrency, formatDateTime, formatQuantity } from '../data/demoData';
 import { getPaymentMethodLabel } from './paymentUtils';
 import { getSaleFinancialSummary } from './salesUtils';
+import { getSpecialOrderFinancialSummary } from './specialOrderUtils';
 
 const basePrintDocument = ({ title, body }) => `
   <!doctype html>
@@ -139,9 +140,10 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
     <div class="totals">
       <div class="row"><span>Subtotal</span><strong>${formatCurrency(summary.subtotal)}</strong></div>
       ${summary.discount > 0 ? `<div class="row"><span>Descuentos</span><strong>-${formatCurrency(summary.discount)}</strong></div>` : ''}
+      ${summary.discount > 0 ? `<div class="row"><span>Subtotal neto</span><strong>${formatCurrency(Math.max(0, summary.subtotal - summary.discount))}</strong></div>` : ''}
       ${summary.taxBreakdown.state > 0 ? `<div class="row"><span>IVU estatal</span><strong>${formatCurrency(summary.taxBreakdown.state)}</strong></div>` : ''}
       ${summary.taxBreakdown.municipal > 0 ? `<div class="row"><span>IVU municipal</span><strong>${formatCurrency(summary.taxBreakdown.municipal)}</strong></div>` : ''}
-      <div class="row"><span>IVU total</span><strong>${formatCurrency(summary.tax)}</strong></div>
+      ${summary.taxBreakdown.state <= 0 && summary.taxBreakdown.municipal <= 0 && summary.tax > 0 ? `<div class="row"><span>IVU</span><strong>${formatCurrency(summary.tax)}</strong></div>` : ''}
       <div class="row"><span>Total</span><strong>${formatCurrency(summary.total)}</strong></div>
       <div class="row"><span>Tipo de pago</span><strong>${getPaymentMethodLabel(sale.paymentMethod)}</strong></div>
       ${(sale.payments || []).length > 1 ? (sale.payments || []).map((payment) => `
@@ -233,6 +235,7 @@ export const buildSaleRefundPrintHtml = ({ sale, refund, printerName = '' }) => 
 };
 
 export const buildSpecialOrderPrintHtml = ({ order, printerName = '' }) => {
+  const summary = getSpecialOrderFinancialSummary(order);
   const body = `
     ${buildStoreHeader({
       employeeLabel: 'Cliente',
@@ -253,7 +256,7 @@ export const buildSpecialOrderPrintHtml = ({ order, printerName = '' }) => {
           </tr>
         </thead>
         <tbody>
-          ${order.items.map((item) => `
+          ${summary.items.map((item) => `
             <tr>
               <td>
                 ${item.name}
@@ -271,12 +274,13 @@ export const buildSpecialOrderPrintHtml = ({ order, printerName = '' }) => {
     </div>
 
     <div class="totals">
-      <div class="row"><span>Subtotal</span><strong>${formatCurrency(order.subtotalAmount || 0)}</strong></div>
-      ${order.discountAmount > 0 ? `<div class="row"><span>Descuentos</span><strong>-${formatCurrency(order.discountAmount)}</strong></div>` : ''}
-      ${order.taxBreakdown?.state > 0 ? `<div class="row"><span>IVU estatal</span><strong>${formatCurrency(order.taxBreakdown.state)}</strong></div>` : ''}
-      ${order.taxBreakdown?.municipal > 0 ? `<div class="row"><span>IVU municipal</span><strong>${formatCurrency(order.taxBreakdown.municipal)}</strong></div>` : ''}
-      <div class="row"><span>IVU total</span><strong>${formatCurrency(order.taxAmount || 0)}</strong></div>
-      <div class="row"><span>Total</span><strong>${formatCurrency((order.totalAmount || 0) + (order.taxAmount || 0))}</strong></div>
+      <div class="row"><span>Subtotal</span><strong>${formatCurrency(summary.subtotal)}</strong></div>
+      ${summary.discount > 0 ? `<div class="row"><span>Descuentos</span><strong>-${formatCurrency(summary.discount)}</strong></div>` : ''}
+      ${summary.discount > 0 ? `<div class="row"><span>Subtotal neto</span><strong>${formatCurrency(summary.taxableSubtotal)}</strong></div>` : ''}
+      ${summary.taxBreakdown.state > 0 ? `<div class="row"><span>IVU estatal</span><strong>${formatCurrency(summary.taxBreakdown.state)}</strong></div>` : ''}
+      ${summary.taxBreakdown.municipal > 0 ? `<div class="row"><span>IVU municipal</span><strong>${formatCurrency(summary.taxBreakdown.municipal)}</strong></div>` : ''}
+      ${summary.taxBreakdown.state <= 0 && summary.taxBreakdown.municipal <= 0 && summary.tax > 0 ? `<div class="row"><span>IVU</span><strong>${formatCurrency(summary.tax)}</strong></div>` : ''}
+      <div class="row"><span>Total</span><strong>${formatCurrency(summary.total)}</strong></div>
       <div class="row"><span>Anticipo</span><strong>${formatCurrency(order.depositAmount)}</strong></div>
       <div class="row"><span>Cobrado</span><strong>${formatCurrency(order.amountPaid)}</strong></div>
       <div class="row"><span>Balance</span><strong>${formatCurrency(order.balanceDue)}</strong></div>

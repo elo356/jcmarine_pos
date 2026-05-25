@@ -67,20 +67,22 @@ export const getSaleItemFinancials = (item = {}) => {
 
 export const getSaleFinancialSummary = (sale = {}) => {
   const items = Array.isArray(sale.items) ? sale.items.map(getSaleItemFinancials) : [];
+  const itemSubtotal = roundMoney(items.reduce((sum, item) => sum + item.subtotal, 0));
+  const itemDiscount = roundMoney(items.reduce((sum, item) => sum + item.discountAmount, 0));
   const subtotal = roundMoney(
-    sale.subtotal ?? items.reduce((sum, item) => sum + item.subtotal, 0)
+    items.length > 0 ? itemSubtotal : (sale.subtotal ?? 0)
   );
   const discount = roundMoney(
-    sale.discount ?? items.reduce((sum, item) => sum + item.discountAmount, 0)
+    items.length > 0 ? itemDiscount : (sale.discount ?? 0)
   );
   const itemStateTax = roundMoney(items.reduce((sum, item) => sum + item.taxBreakdown.state, 0));
   const itemMunicipalTax = roundMoney(items.reduce((sum, item) => sum + item.taxBreakdown.municipal, 0));
   const taxBreakdown = {
-    state: roundMoney(sale.taxBreakdown?.state ?? sale.tax_state ?? itemStateTax),
-    municipal: roundMoney(sale.taxBreakdown?.municipal ?? sale.tax_municipal ?? itemMunicipalTax)
+    state: roundMoney(items.length > 0 ? itemStateTax : (sale.taxBreakdown?.state ?? sale.tax_state ?? 0)),
+    municipal: roundMoney(items.length > 0 ? itemMunicipalTax : (sale.taxBreakdown?.municipal ?? sale.tax_municipal ?? 0))
   };
   const tax = roundMoney(
-    sale.tax ?? sale.taxAmount ?? sale.tax_amount ?? (taxBreakdown.state + taxBreakdown.municipal)
+    items.length > 0 ? (taxBreakdown.state + taxBreakdown.municipal) : (sale.tax ?? sale.taxAmount ?? sale.tax_amount ?? (taxBreakdown.state + taxBreakdown.municipal))
   );
   const total = roundMoney(
     sale.total ?? Math.max(0, subtotal - discount) + tax
