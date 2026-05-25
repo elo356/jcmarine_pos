@@ -30,7 +30,11 @@ import {
   getSaleTenderTotalByMethod,
   isReportableSale
 } from '../utils/salesUtils';
-import { getStandaloneSpecialOrderPaymentNet } from '../utils/specialOrderUtils';
+import {
+  buildSpecialOrderPaymentSaleId,
+  normalizeSpecialOrderPayment,
+  SPECIAL_ORDER_PAYMENT_KIND
+} from '../utils/specialOrderUtils';
 import { printHtmlDocument } from '../services/printService';
 import {
   buildWeeklyShiftClosureRecord,
@@ -72,6 +76,24 @@ const getCashCountTotal = (cashCountBreakdown = {}) => roundMoney(
     0
   )
 );
+
+const getStandaloneSpecialOrderPaymentTotal = (
+  payments = [],
+  sales = [],
+  predicate = () => true,
+  kind = SPECIAL_ORDER_PAYMENT_KIND.payment
+) => {
+  const saleIds = new Set((sales || []).map((sale) => sale.id));
+
+  return roundMoney((payments || [])
+    .map(normalizeSpecialOrderPayment)
+    .filter((payment) => (
+      payment.kind === kind &&
+      predicate(payment) &&
+      !saleIds.has(buildSpecialOrderPaymentSaleId(payment))
+    ))
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+};
 
 const StorePage = () => {
   const { user, profile } = useAuth();
@@ -219,38 +241,112 @@ const StorePage = () => {
       const paymentTime = new Date(payment.createdAt || payment.confirmed_at).getTime();
       return paymentTime >= openedAtMs;
     });
-    const activeStandaloneSpecialRevenue = roundMoney(getStandaloneSpecialOrderPaymentNet(
+    const activeStandaloneSpecialRevenue = roundMoney(
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        () => true,
+        SPECIAL_ORDER_PAYMENT_KIND.deposit
+      ) +
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        () => true,
+        SPECIAL_ORDER_PAYMENT_KIND.payment
+      ) -
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        () => true,
+        SPECIAL_ORDER_PAYMENT_KIND.refund
+      )
+    );
+    const standaloneSpecialRefunds = getStandaloneSpecialOrderPaymentTotal(
       standalonePayments,
       sales,
-      () => true
-    ));
+      () => true,
+      SPECIAL_ORDER_PAYMENT_KIND.refund
+    );
     const grossSales = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.subtotal || 0), 0));
     const discounts = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.discount || 0), 0));
-    const refunds = roundMoney(sales.reduce((sum, sale) => sum + getSaleRefundTotalFrom(sale, openedAtMs), 0));
+    const refunds = roundMoney(
+      sales.reduce((sum, sale) => sum + getSaleRefundTotalFrom(sale, openedAtMs), 0) +
+      standaloneSpecialRefunds
+    );
     const taxes = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.tax || 0), 0));
     const totalTendered = roundMoney(paidSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + activeStandaloneSpecialRevenue);
     const cashPayments = roundMoney(
       paidSales
         .reduce((sum, sale) => sum + getSaleTenderTotalByMethod(sale, PAYMENT_METHODS.cash), 0) +
-      getStandaloneSpecialOrderPaymentNet(standalonePayments, sales, (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.cash)
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.cash,
+        SPECIAL_ORDER_PAYMENT_KIND.deposit
+      ) +
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.cash,
+        SPECIAL_ORDER_PAYMENT_KIND.payment
+      )
     );
     const athMovilPayments = roundMoney(
       paidSales
         .reduce((sum, sale) => sum + getSaleTenderTotalByMethod(sale, PAYMENT_METHODS.athMovil), 0) +
-      getStandaloneSpecialOrderPaymentNet(standalonePayments, sales, (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.athMovil)
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.athMovil,
+        SPECIAL_ORDER_PAYMENT_KIND.deposit
+      ) +
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.athMovil,
+        SPECIAL_ORDER_PAYMENT_KIND.payment
+      )
     );
     const cardPayments = roundMoney(
       paidSales
         .reduce((sum, sale) => sum + getSaleTenderTotalByMethod(sale, PAYMENT_METHODS.card), 0) +
-      getStandaloneSpecialOrderPaymentNet(standalonePayments, sales, (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.card)
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.card,
+        SPECIAL_ORDER_PAYMENT_KIND.deposit
+      ) +
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.card,
+        SPECIAL_ORDER_PAYMENT_KIND.payment
+      )
     );
     const paypalPayments = roundMoney(
       paidSales
         .reduce((sum, sale) => sum + getSaleTenderTotalByMethod(sale, PAYMENT_METHODS.paypal), 0) +
-      getStandaloneSpecialOrderPaymentNet(standalonePayments, sales, (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.paypal)
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.paypal,
+        SPECIAL_ORDER_PAYMENT_KIND.deposit
+      ) +
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.paypal,
+        SPECIAL_ORDER_PAYMENT_KIND.payment
+      )
     );
     const cashRefunds = roundMoney(
-      sales.reduce((sum, sale) => sum + getSaleRefundTotalFrom(sale, openedAtMs, PAYMENT_METHODS.cash), 0)
+      sales.reduce((sum, sale) => sum + getSaleRefundTotalFrom(sale, openedAtMs, PAYMENT_METHODS.cash), 0) +
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.cash,
+        SPECIAL_ORDER_PAYMENT_KIND.refund
+      )
     );
     const paidIn = roundMoney(getNumber(closeForm.paidIn));
     const paidOut = roundMoney(getNumber(closeForm.paidOut));

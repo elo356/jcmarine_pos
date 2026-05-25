@@ -6,9 +6,15 @@ import { subscribeSales } from '../services/salesService';
 import { subscribeProducts } from '../services/inventoryService';
 import { printHtmlDocument } from '../services/printService';
 import { normalizePaymentMethod } from '../utils/paymentUtils';
-import { getNetSaleTotal, isReportableSale } from '../utils/salesUtils';
+import { getNetSaleTotal, getSaleRefunds, isReportableSale } from '../utils/salesUtils';
 import { subscribeSpecialOrderPayments, subscribeSpecialOrders } from '../services/specialOrdersService';
-import { getStandaloneSpecialOrderPaymentNet, normalizeSpecialOrder, SPECIAL_ORDER_STATUS } from '../utils/specialOrderUtils';
+import {
+  buildSpecialOrderPaymentSaleId,
+  normalizeSpecialOrder,
+  normalizeSpecialOrderPayment,
+  SPECIAL_ORDER_PAYMENT_KIND,
+  SPECIAL_ORDER_STATUS
+} from '../utils/specialOrderUtils';
 
 const Reports = () => {
   const [sales, setSales] = useState([]);
@@ -83,6 +89,66 @@ const Reports = () => {
     });
   };
 
+  const getDateRangeAllSales = () => {
+    const start = parseLocalDate(startDate, false);
+    const end = parseLocalDate(endDate, true);
+    if (!start || !end) return [];
+
+    return sales.filter((sale) => {
+      const saleDate = new Date(sale.date);
+      return saleDate >= start && saleDate <= end;
+    });
+  };
+
+  const getStandaloneSpecialOrderPaymentTotal = (
+    predicate = () => true,
+    kind = SPECIAL_ORDER_PAYMENT_KIND.payment
+  ) => {
+    const saleIds = new Set((sales || []).map((sale) => sale.id));
+
+    return specialOrderPayments
+      .map(normalizeSpecialOrderPayment)
+      .filter((payment) => (
+        payment.kind === kind &&
+        predicate(payment) &&
+        !saleIds.has(buildSpecialOrderPaymentSaleId(payment))
+      ))
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  };
+
+  const getRefundsInDateRange = () => {
+    const start = parseLocalDate(startDate, false);
+    const end = parseLocalDate(endDate, true);
+    if (!start || !end) return [];
+
+    const saleRefunds = sales.flatMap((sale) => (
+      getSaleRefunds(sale)
+        .filter((refund) => {
+          const refundDate = new Date(refund.refundedAt || sale.refunded_at || sale.date);
+          return refundDate >= start && refundDate <= end;
+        })
+        .map((refund) => ({
+          amount: Number(refund.amount || 0),
+          method: normalizePaymentMethod(refund.method)
+        }))
+    ));
+
+    const specialRefunds = specialOrderPayments
+      .map(normalizeSpecialOrderPayment)
+      .filter((payment) => {
+        const paymentDate = new Date(payment.createdAt);
+        return payment.kind === SPECIAL_ORDER_PAYMENT_KIND.refund &&
+          paymentDate >= start &&
+          paymentDate <= end;
+      })
+      .map((payment) => ({
+        amount: Number(payment.amount || 0),
+        method: normalizePaymentMethod(payment.method)
+      }));
+
+    return [...saleRefunds, ...specialRefunds];
+  };
+
   const handleDateRangePreset = (range) => {
     const end = new Date();
     const start = new Date();
@@ -111,27 +177,30 @@ const Reports = () => {
 
   const calculateMetrics = () => {
     const filteredSales = getDateRangeSales();
+    const dateRangeSales = getDateRangeAllSales();
     const start = parseLocalDate(startDate, false);
     const end = parseLocalDate(endDate, true);
     const standaloneTransactions = specialOrderPayments.filter((payment) => {
-      const paymentDate = new Date(payment.createdAt || payment.confirmed_at);
+      const normalizedPayment = normalizeSpecialOrderPayment(payment);
+      const paymentDate = new Date(normalizedPayment.createdAt);
       return Boolean(
         start &&
         end &&
         paymentDate >= start &&
         paymentDate <= end &&
-        !sales.some((sale) => sale.id === `sale_special_order_${payment.id}`)
+        normalizedPayment.kind !== SPECIAL_ORDER_PAYMENT_KIND.refund &&
+        !sales.some((sale) => sale.id === buildSpecialOrderPaymentSaleId(normalizedPayment))
       );
     });
-    const specialRevenue = getStandaloneSpecialOrderPaymentNet(
-      specialOrderPayments,
-      sales,
-      (payment) => {
-        const paymentDate = new Date(payment.createdAt || payment.confirmed_at);
-        return Boolean(start && end && paymentDate >= start && paymentDate <= end);
-      }
-    );
-    const totalRevenue = filteredSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + specialRevenue;
+    const specialRevenue = getStandaloneSpecialOrderPaymentTotal((payment) => {
+      const paymentDate = new Date(payment.createdAt);
+      return Boolean(start && end && paymentDate >= start && paymentDate <= end);
+    }, SPECIAL_ORDER_PAYMENT_KIND.deposit) + getStandaloneSpecialOrderPaymentTotal((payment) => {
+      const paymentDate = new Date(payment.createdAt);
+      return Boolean(start && end && paymentDate >= start && paymentDate <= end);
+    }, SPECIAL_ORDER_PAYMENT_KIND.payment);
+    const totalRefunds = getRefundsInDateRange().reduce((sum, refund) => sum + refund.amount, 0);
+    const totalRevenue = dateRangeSales.reduce((sum, sale) => sum + Number(sale.total || 0), 0) + specialRevenue - totalRefunds;
     const totalItems = filteredSales.reduce((sum, sale) => 
       sum + sale.items.reduce((itemSum, item) => itemSum + (item.nonInventory ? 0 : item.quantity), 0), 0
     );
@@ -148,6 +217,7 @@ const Reports = () => {
 
     return {
       totalRevenue,
+      totalRefunds,
       totalItems,
       totalTransactions,
       avgTransaction,
@@ -211,9 +281,7 @@ const Reports = () => {
     });
 
     Object.keys(methodSales).forEach((method) => {
-      methodSales[method] += getStandaloneSpecialOrderPaymentNet(
-        specialOrderPayments,
-        sales,
+      methodSales[method] += getStandaloneSpecialOrderPaymentTotal(
         (payment) => {
           const paymentDate = new Date(payment.createdAt || payment.confirmed_at);
           return Boolean(
@@ -223,8 +291,28 @@ const Reports = () => {
             paymentDate <= end &&
             normalizePaymentMethod(payment.method) === method
           );
-        }
+        },
+        SPECIAL_ORDER_PAYMENT_KIND.deposit
       );
+      methodSales[method] += getStandaloneSpecialOrderPaymentTotal(
+        (payment) => {
+          const paymentDate = new Date(payment.createdAt || payment.confirmed_at);
+          return Boolean(
+            start &&
+            end &&
+            paymentDate >= start &&
+            paymentDate <= end &&
+            normalizePaymentMethod(payment.method) === method
+          );
+        },
+        SPECIAL_ORDER_PAYMENT_KIND.payment
+      );
+    });
+
+    getRefundsInDateRange().forEach((refund) => {
+      if (methodSales.hasOwnProperty(refund.method)) {
+        methodSales[refund.method] -= Number(refund.amount || 0);
+      }
     });
 
     return methodSales;
@@ -358,6 +446,7 @@ const Reports = () => {
               <div class="card">
                 <h3>Resumen</h3>
                 <div class="metric"><span>Ingresos</span><strong>${formatCurrency(metrics.totalRevenue)}</strong></div>
+                <div class="metric"><span>Refunds</span><strong>${formatCurrency(metrics.totalRefunds)}</strong></div>
                 <div class="metric"><span>Ganancia</span><strong>${formatCurrency(metrics.totalProfit + specialOrderMetrics.deliveredProfit)}</strong></div>
                 <div class="metric"><span>Transacciones</span><strong>${metrics.totalTransactions}</strong></div>
                 <div class="metric"><span>Ticket promedio</span><strong>${formatCurrency(metrics.avgTransaction)}</strong></div>
@@ -535,7 +624,10 @@ const Reports = () => {
           <div className="stat-value">{formatCurrency(metrics.totalRevenue)}</div>
           <div className="stat-trend">
             <DollarSign size={16} className="text-green-500" />
-            <span className="text-green-500">Ventas brutas</span>
+            <span className="text-green-500">Neto despues de refunds</span>
+          </div>
+          <div className="mt-2 text-sm text-red-600">
+            Refunds: {formatCurrency(metrics.totalRefunds)}
           </div>
         </div>
         <div className="card p-6">
