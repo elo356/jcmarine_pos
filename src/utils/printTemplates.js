@@ -169,6 +169,7 @@ export const buildSalePrintHtml = ({ sale, documentType = 'receipt', printerName
 };
 
 export const buildSaleRefundPrintHtml = ({ sale, refund, printerName = '' }) => {
+  const refundItems = Array.isArray(refund.items) ? refund.items : [];
   const body = `
     ${buildStoreHeader({
       employeeLabel: 'Empleado',
@@ -186,6 +187,30 @@ export const buildSaleRefundPrintHtml = ({ sale, refund, printerName = '' }) => 
       <div class="row"><span>Monto refund</span><strong>${formatCurrency(refund.amount)}</strong></div>
       <div class="row"><span>Total original</span><strong>${formatCurrency(sale.total)}</strong></div>
     </div>
+
+    ${refundItems.length > 0 ? `
+      ${dottedDivider}
+      <div class="section">
+        <table>
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Cant.</th>
+              <th>Monto</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${refundItems.map((item) => `
+              <tr>
+                <td>${item.name}${item.selectedSize ? ` (${item.selectedSize})` : ''}</td>
+                <td>${formatQuantity(item.quantity, 'unit')}</td>
+                <td>${formatCurrency(item.amount || 0)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    ` : ''}
 
     ${refund.reason ? `
       ${dottedDivider}

@@ -14,7 +14,8 @@ import {
   saveData
 } from '../data/demoData';
 import { subscribeProducts } from '../services/inventoryService';
-import { refundSale, registerSaleExchange, resetAllSaleExchangesSync, subscribeSales } from '../services/salesService';
+import { refundSale, registerSaleExchange, resetAllSaleExchangesSync, saveSale, subscribeSales } from '../services/salesService';
+import { subscribeSpecialOrders } from '../services/specialOrdersService';
 import { syncWeeklySalesCache, upsertWeeklyCachedSale } from '../services/weeklySalesCacheService';
 import { buildPaymentEntry, getPaymentMethodLabel, normalizePaymentMethod } from '../utils/paymentUtils';
 import {
@@ -30,6 +31,7 @@ import {
   normalizeSaleRefund,
   normalizeSaleStatus
 } from '../utils/salesUtils';
+import { buildSpecialOrderPaymentSale } from '../utils/specialOrderUtils';
 import { useAuth } from '../contexts/AuthContext';
 import { buildSalePrintHtml, buildSaleRefundPrintHtml } from '../utils/printTemplates';
 import { printHtmlDocument } from '../services/printService';
@@ -39,7 +41,9 @@ const DEFAULT_REFUND_FORM = {
   amount: '',
   method: '',
   reason: '',
-  notes: ''
+  notes: '',
+  saleItemKey: '',
+  quantity: 1
 };
 
 const DEFAULT_EXCHANGE_FORM = {
@@ -51,11 +55,94 @@ const DEFAULT_EXCHANGE_FORM = {
   notes: ''
 };
 
-const getSaleItemKey = (saleId, item = {}, index = 0) => `${saleId}::${item.productId || 'item'}::${index}`;
+const getSaleItemKey = (saleId, item = {}, index = 0) =>
+  `${saleId}::${item.productId || item.sourceSpecialOrderItemId || item.id || 'item'}::${index}`;
+const hasDetailedSaleItems = (sale = {}) =>
+  (sale.items || []).some((item) => item.isSpecialOrderPayment !== true);
+const canRefundSale = (sale = {}) =>
+  !isRefundedSale(sale) && (!isSpecialOrderPaymentSale(sale) || hasDetailedSaleItems(sale));
+const canExchangeSale = (sale = {}) =>
+  !isSpecialOrderPaymentSale(sale) || hasDetailedSaleItems(sale);
+const isLegacySpecialOrderPaymentSale = (sale = {}) =>
+  isSpecialOrderPaymentSale(sale) &&
+  (sale.items || []).length === 1 &&
+  sale.items[0]?.isSpecialOrderPayment === true;
+const getSaleSpecialOrderNumber = (sale = {}) => {
+  if (sale.specialOrderNumber) return sale.specialOrderNumber;
+
+  const searchableText = [
+    sale.paymentReference,
+    sale.reference,
+    sale.items?.[0]?.name,
+    sale.items?.[0]?.referenceOrderNumber,
+    sale.payments?.[0]?.reference
+  ].filter(Boolean).join(' ');
+  const match = searchableText.match(/PE-\d{8}-[A-Z0-9]+/i);
+
+  return match ? match[0].toUpperCase() : '';
+};
+const findSpecialOrderForSale = (sale = {}, specialOrders = []) => {
+  const saleOrderNumber = getSaleSpecialOrderNumber(sale);
+
+  return specialOrders.find((entry) => (
+    entry.id === sale.specialOrderId ||
+    entry.orderNumber === sale.specialOrderNumber ||
+    (saleOrderNumber && String(entry.orderNumber || '').toUpperCase() === saleOrderNumber)
+  ));
+};
+const hydrateSpecialOrderPaymentSales = (sales = [], specialOrders = []) =>
+  sales.map((sale) => {
+    if (!isLegacySpecialOrderPaymentSale(sale)) return sale;
+
+    const order = findSpecialOrderForSale(sale, specialOrders);
+    if (!order) return sale;
+
+    const mirroredSale = buildSpecialOrderPaymentSale({
+      order,
+      payment: {
+        ...(sale.payments?.[0] || {}),
+        id: sale.specialOrderPaymentId || sale.payments?.[0]?.id || sale.id,
+        saleId: sale.id,
+        specialOrderId: order.id,
+        kind: sale.specialOrderPaymentKind || 'payment',
+        method: sale.paymentMethod || sale.payment_method || sale.payments?.[0]?.method,
+        amount: sale.total || sale.payments?.[0]?.amount || 0,
+        createdAt: sale.date || sale.created_at,
+        confirmedBy: sale.cashier || sale.payments?.[0]?.confirmed_by || '',
+        confirmedById: sale.cashierId || sale.payments?.[0]?.confirmed_by_id || ''
+      }
+    });
+
+    return {
+      ...sale,
+      ...mirroredSale,
+      refunds: sale.refunds || mirroredSale.refunds,
+      exchanges: sale.exchanges || mirroredSale.exchanges,
+      status: sale.status || mirroredSale.status,
+      paymentStatus: sale.paymentStatus || mirroredSale.paymentStatus,
+      refunded_at: sale.refunded_at || mirroredSale.refunded_at,
+      refunded_by: sale.refunded_by || mirroredSale.refunded_by,
+      refundedAmount: sale.refundedAmount || mirroredSale.refundedAmount
+    };
+  });
+const persistHydratedLegacySpecialOrderSales = (sales = [], specialOrders = []) => {
+  const hydratedSales = hydrateSpecialOrderPaymentSales(sales, specialOrders);
+  const changed = hydratedSales.some((sale, index) => (
+    isLegacySpecialOrderPaymentSale(sales[index]) &&
+    !isLegacySpecialOrderPaymentSale(sale) &&
+    (sale.items || []).some((item) => item.isSpecialOrderPayment !== true)
+  ));
+
+  return {
+    hydratedSales,
+    changed
+  };
+};
 
 function Sales() {
   const { user, profile } = useAuth();
   const [sales, setSales] = useState([]);
+  const [specialOrders, setSpecialOrders] = useState([]);
   const [products, setProducts] = useState([]);
   const [filterDate, setFilterDate] = useState('');
   const [filterMethod, setFilterMethod] = useState('');
@@ -70,14 +157,57 @@ function Sales() {
 
   useEffect(() => {
     const data = loadData();
-    setSales(data.sales || []);
+    setSpecialOrders(data.specialOrders || []);
+    const initialMigration = persistHydratedLegacySpecialOrderSales(data.sales || [], data.specialOrders || []);
+    if (initialMigration.changed) {
+      saveData({
+        ...data,
+        sales: initialMigration.hydratedSales
+      });
+    }
+    setSales(initialMigration.hydratedSales);
 
     const unsubscribe = subscribeSales(
       (rows) => {
-        setSales(rows || []);
+        const latestData = loadData();
+        const migration = persistHydratedLegacySpecialOrderSales(rows || [], latestData.specialOrders || []);
+        setSales(migration.hydratedSales);
       },
       (error) => {
         console.error('Error subscribing sales:', error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeSpecialOrders(
+      (rows) => {
+        setSpecialOrders(rows || []);
+        setSales((currentSales) => {
+          const { hydratedSales, changed } = persistHydratedLegacySpecialOrderSales(currentSales, rows || []);
+
+          if (changed) {
+            const data = loadData();
+            saveData({
+              ...data,
+              sales: hydrateSpecialOrderPaymentSales(data.sales || [], rows || [])
+            });
+            hydratedSales
+              .filter((sale, index) => !isLegacySpecialOrderPaymentSale(sale) && isLegacySpecialOrderPaymentSale(currentSales[index]))
+              .forEach((sale) => {
+                saveSale(sale).catch((error) => {
+                  console.error('Error syncing migrated special order sale:', error);
+                });
+              });
+          }
+
+          return hydratedSales;
+        });
+      },
+      (error) => {
+        console.error('Error subscribing special orders in sales:', error);
       }
     );
 
@@ -118,6 +248,61 @@ function Sales() {
     () => (selectedSale ? getSaleFinancialSummary(selectedSale) : null),
     [selectedSale]
   );
+  const refundItemOptions = useMemo(() => {
+    if (!refundTarget) return [];
+
+    return (refundTarget.items || [])
+      .map((item, index) => {
+        if (item.isSpecialOrderPayment === true) return null;
+
+        const saleItemKey = getSaleItemKey(refundTarget.id, item, index);
+        const refundedCount = getSaleRefunds(refundTarget).reduce((sum, refund) => (
+          sum + (refund.items || []).reduce((itemSum, refundedItem) => (
+            refundedItem.saleItemKey === saleItemKey
+              ? itemSum + Number(refundedItem.quantity || 0)
+              : itemSum
+          ), 0)
+        ), 0);
+        const quantity = Math.max(0, Number(item.quantity || 0));
+        const availableToRefund = Math.max(0, quantity - refundedCount);
+        const financials = getSaleItemFinancials(item);
+        const unitAmount = quantity > 0 ? roundMoney(financials.total / quantity) : 0;
+
+        return {
+          saleItemKey,
+          index,
+          item,
+          availableToRefund,
+          unitAmount
+        };
+      })
+      .filter((entry) => entry && entry.availableToRefund > 0);
+  }, [refundTarget]);
+  const selectedRefundItem = useMemo(
+    () => refundItemOptions.find((entry) => entry.saleItemKey === refundForm.saleItemKey) || null,
+    [refundForm.saleItemKey, refundItemOptions]
+  );
+  useEffect(() => {
+    if (!refundTarget || !selectedRefundItem) return;
+
+    const quantity = Math.min(
+      Math.max(1, Number(refundForm.quantity || 1)),
+      Number(selectedRefundItem.availableToRefund || 1)
+    );
+    const amount = roundMoney(quantity * Number(selectedRefundItem.unitAmount || 0));
+
+    setRefundForm((current) => {
+      if (Number(current.quantity || 1) === quantity && Number(current.amount || 0) === amount) {
+        return current;
+      }
+
+      return {
+        ...current,
+        quantity,
+        amount: amount > 0 ? amount.toFixed(2) : ''
+      };
+    });
+  }, [refundForm.quantity, refundTarget, selectedRefundItem]);
   const exchangeReturnedOptions = useMemo(() => {
     if (!exchangeTarget) return [];
 
@@ -266,12 +451,17 @@ function Sales() {
 
   const openRefundModal = (sale) => {
     const remaining = Math.max(0, Number(sale.total || 0) - getSaleRefundTotal(sale));
+    const firstRefundableItem = (sale.items || [])
+      .map((item, index) => ({ item, saleItemKey: getSaleItemKey(sale.id, item, index) }))
+      .find((entry) => entry.item.isSpecialOrderPayment !== true);
     setRefundTarget(sale);
     setRefundForm({
       amount: remaining > 0 ? remaining.toFixed(2) : '',
       method: normalizePaymentMethod(sale.paymentMethod) || 'cash',
       reason: '',
-      notes: ''
+      notes: '',
+      saleItemKey: firstRefundableItem?.saleItemKey || '',
+      quantity: 1
     });
   };
 
@@ -450,8 +640,26 @@ function Sales() {
   const handleRefund = async () => {
     if (!refundTarget) return;
 
-    const refundAmount = Number(refundForm.amount || 0);
+    const refundQuantity = selectedRefundItem
+      ? Math.min(
+          Math.max(1, Number(refundForm.quantity || 1)),
+          Number(selectedRefundItem.availableToRefund || 1)
+        )
+      : 0;
+    const refundAmount = selectedRefundItem
+      ? roundMoney(refundQuantity * Number(selectedRefundItem.unitAmount || 0))
+      : Number(refundForm.amount || 0);
     const maxRefund = Math.max(0, Number(refundTarget.total || 0) - getSaleRefundTotal(refundTarget));
+
+    if (!selectedRefundItem) {
+      showNotification('error', 'Selecciona el producto que vas a reembolsar.');
+      return;
+    }
+
+    if (refundQuantity <= 0 || refundQuantity > Number(selectedRefundItem.availableToRefund || 0)) {
+      showNotification('error', 'La cantidad a reembolsar no esta disponible para ese producto.');
+      return;
+    }
 
     if (refundAmount <= 0) {
       showNotification('error', 'Indica un monto válido para reembolsar.');
@@ -468,12 +676,27 @@ function Sales() {
       method: refundForm.method || normalizePaymentMethod(refundTarget.paymentMethod) || 'cash',
       reason: refundForm.reason,
       notes: refundForm.notes,
+      items: [
+        {
+          saleItemKey: selectedRefundItem.saleItemKey,
+          productId: selectedRefundItem.item.productId || selectedRefundItem.item.sourceSpecialOrderItemId || '',
+          name: selectedRefundItem.item.name,
+          selectedSize: selectedRefundItem.item.selectedSize || '',
+          quantity: refundQuantity,
+          unitAmount: selectedRefundItem.unitAmount,
+          amount: refundAmount
+        }
+      ],
       refundedBy: profile?.name || user?.email || 'Sistema',
       refundedAt: new Date().toISOString()
     });
 
     const data = loadData();
-    const targetSale = (data.sales || []).find((sale) => sale.id === refundTarget.id);
+    const targetSale = hydrateSpecialOrderPaymentSales(
+      data.sales || [],
+      specialOrders.length > 0 ? specialOrders : (data.specialOrders || [])
+    )
+      .find((sale) => sale.id === refundTarget.id);
 
     if (!targetSale) {
       showNotification('error', 'No se encontró la venta para registrar el reembolso.');
@@ -837,6 +1060,8 @@ function Sales() {
                 const netTotal = getNetSaleTotal(sale);
                 const saleStatus = normalizeSaleStatus(sale.status, sale);
                 const isSpecialPayment = isSpecialOrderPaymentSale(sale);
+                const refundAllowed = canRefundSale(sale);
+                const exchangeAllowed = canExchangeSale(sale);
 
                 return (
                   <tr key={sale.id} className="hover:bg-gray-50">
@@ -910,17 +1135,17 @@ function Sales() {
                         </button>
                         <button
                           onClick={() => openRefundModal(sale)}
-                          disabled={isRefundedSale(sale) || isSpecialPayment}
+                          disabled={!refundAllowed}
                           className={`inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg ${
-                            isRefundedSale(sale) || isSpecialPayment
+                            !refundAllowed
                               ? 'text-gray-300 cursor-not-allowed'
                               : 'text-red-700 hover:bg-red-50'
                           }`}
                           title={
-                            isSpecialPayment
-                              ? 'Los reembolsos de órdenes especiales se manejan desde Pedidos especiales'
-                              : isRefundedSale(sale)
-                                ? 'Venta ya reembolsada por completo'
+                            isRefundedSale(sale)
+                              ? 'Venta ya reembolsada por completo'
+                              : isSpecialPayment && !hasDetailedSaleItems(sale)
+                                ? 'Esta orden especial vieja no tiene piezas detalladas en la venta'
                                 : 'Registrar reembolso parcial o total'
                           }
                         >
@@ -929,13 +1154,13 @@ function Sales() {
                         </button>
                         <button
                           onClick={() => openExchangeModal(sale)}
-                          disabled={isSpecialPayment}
+                          disabled={!exchangeAllowed}
                           className={`inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg ${
-                            isSpecialPayment
+                            !exchangeAllowed
                               ? 'text-gray-300 cursor-not-allowed'
                               : 'text-amber-700 hover:bg-amber-50'
                           }`}
-                          title={isSpecialPayment ? 'Este tipo de venta no permite cambio directo de pieza' : 'Cambiar una pieza por otra'}
+                          title={exchangeAllowed ? 'Cambiar una pieza por otra' : 'Esta orden especial vieja no tiene piezas detalladas en la venta'}
                         >
                           <ArrowRightLeft size={18} />
                           Cambio
@@ -1009,14 +1234,14 @@ function Sales() {
                   </button>
                   <button
                     className="btn btn-secondary"
-                    disabled={isRefundedSale(selectedSale) || isSpecialOrderPaymentSale(selectedSale)}
+                    disabled={!canRefundSale(selectedSale)}
                     onClick={() => openRefundModal(selectedSale)}
                   >
                     Registrar refund
                   </button>
                   <button
                     className="btn btn-secondary"
-                    disabled={isSpecialOrderPaymentSale(selectedSale)}
+                    disabled={!canExchangeSale(selectedSale)}
                     onClick={() => openExchangeModal(selectedSale)}
                   >
                     Cambio de pieza
@@ -1066,6 +1291,11 @@ function Sales() {
                     <div>
                       <p className="font-medium text-red-700">-{formatCurrency(refund.amount)}</p>
                       <p className="text-sm text-gray-600">{getPaymentMethodLabel(refund.method)}</p>
+                      {(refund.items || []).map((item) => (
+                        <p key={`${refund.id}_${item.saleItemKey}`} className="text-sm text-gray-600">
+                          {item.name}{item.selectedSize ? ` (${item.selectedSize})` : ''} x {formatQuantity(item.quantity, 'unit')}
+                        </p>
+                      ))}
                       {refund.reason && <p className="text-sm text-gray-600">Razón: {refund.reason}</p>}
                       {refund.notes && <p className="text-xs text-gray-500 mt-1">{refund.notes}</p>}
                     </div>
@@ -1138,15 +1368,54 @@ function Sales() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Monto a reembolsar</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={refundForm.amount}
-                onChange={(e) => setRefundForm((current) => ({ ...current, amount: e.target.value }))}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Producto a reembolsar</label>
+              <select
+                value={refundForm.saleItemKey}
+                onChange={(e) => setRefundForm((current) => ({
+                  ...current,
+                  saleItemKey: e.target.value,
+                  quantity: 1
+                }))}
                 className="input w-full"
-              />
+              >
+                <option value="">Selecciona un producto</option>
+                {refundItemOptions.map((option) => (
+                  <option key={option.saleItemKey} value={option.saleItemKey}>
+                    {option.item.name}
+                    {option.item.selectedSize ? ` (${option.item.selectedSize})` : ''}
+                    {' - '}
+                    {formatCurrency(option.unitAmount)}
+                    {' - disponible: '}
+                    {option.availableToRefund}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Cantidad</label>
+                <input
+                  type="number"
+                  min="1"
+                  max={selectedRefundItem?.availableToRefund || 1}
+                  step="1"
+                  value={refundForm.quantity}
+                  onChange={(e) => setRefundForm((current) => ({ ...current, quantity: e.target.value }))}
+                  className="input w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Monto</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={refundForm.amount}
+                  readOnly
+                  className="input w-full bg-gray-100"
+                />
+              </div>
             </div>
 
             <div>

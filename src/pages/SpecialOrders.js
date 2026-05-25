@@ -294,24 +294,25 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     const currentData = loadData();
     const currentSales = currentData.sales || [];
     const currentRegisterPayments = currentData.payments || [];
-    const salesById = new Set(currentSales.map((sale) => sale.id));
-    const missingMirrors = payments.filter((payment) => (
-      payment.kind !== SPECIAL_ORDER_PAYMENT_KIND.refund &&
-      !salesById.has(buildSpecialOrderPaymentSaleId(payment))
-    ));
-
-    if (missingMirrors.length === 0) {
-      return;
-    }
-
+    const mirrorablePayments = payments.filter((payment) => payment.kind !== SPECIAL_ORDER_PAYMENT_KIND.refund);
     const mirroredSales = [];
     const mirroredRegisterPayments = [...currentRegisterPayments];
 
-    missingMirrors.forEach((payment) => {
+    mirrorablePayments.forEach((payment) => {
       const order = hydratedOrders.find((entry) => entry.id === payment.specialOrderId);
       if (!order) return;
 
+      const saleId = buildSpecialOrderPaymentSaleId(payment);
+      const existingSale = currentSales.find((sale) => sale.id === saleId);
       const mirroredSale = buildSpecialOrderPaymentSale({ order, payment });
+      const existingItems = existingSale?.items || [];
+      const existingIsLegacyPaymentLine = existingItems.length === 1 && existingItems[0]?.isSpecialOrderPayment === true;
+      const mirroredHasOrderItems = (mirroredSale.items || []).some((item) => item.isSpecialOrderPayment !== true);
+
+      if (existingSale && (!existingIsLegacyPaymentLine || !mirroredHasOrderItems)) {
+        return;
+      }
+
       mirroredSales.push(mirroredSale);
 
       if (!mirroredRegisterPayments.some((entry) => entry.id === payment.id)) {
@@ -325,8 +326,9 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
 
     if (mirroredSales.length === 0) return;
 
+    const mirroredSaleIds = new Set(mirroredSales.map((sale) => sale.id));
     updateLocalState({
-      nextSales: [...mirroredSales, ...currentSales.filter((sale) => !mirroredSales.some((entry) => entry.id === sale.id))],
+      nextSales: [...mirroredSales, ...currentSales.filter((sale) => !mirroredSaleIds.has(sale.id))],
       nextRegisterPayments: mirroredRegisterPayments
     });
   }, [hydratedOrders, payments]);

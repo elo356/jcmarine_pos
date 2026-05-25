@@ -102,6 +102,15 @@ export const normalizeSaleRefund = (refund = {}) => ({
   method: refund.method || refund.paymentMethod || 'cash',
   reason: refund.reason || '',
   notes: refund.notes || '',
+  items: Array.isArray(refund.items) ? refund.items.map((item) => ({
+    saleItemKey: item.saleItemKey || '',
+    productId: item.productId || '',
+    name: item.name || '',
+    selectedSize: item.selectedSize || '',
+    quantity: Number(item.quantity || 0),
+    unitAmount: roundMoney(item.unitAmount || 0),
+    amount: roundMoney(item.amount || 0)
+  })) : [],
   refundedAt: refund.refundedAt || refund.refunded_at || new Date().toISOString(),
   refundedBy: refund.refundedBy || refund.refunded_by || ''
 });

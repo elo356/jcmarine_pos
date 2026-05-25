@@ -96,15 +96,6 @@ export const normalizeSpecialOrderItem = (item = {}) => {
         type: 'percentage',
         value: Math.max(0, Number(item.discount?.value || item.discountValue || 0))
       };
-  const hasStoredTaxConfig = (
-    item.ivuStateEnabled !== undefined ||
-    item.ivuMunicipalEnabled !== undefined ||
-    item.discountAmount !== undefined ||
-    item.tax !== undefined ||
-    item.taxBreakdown !== undefined ||
-    item.total !== undefined ||
-    item.taxableSubtotal !== undefined
-  );
   const ivuStateEnabled = item.ivuStateEnabled !== undefined ? item.ivuStateEnabled !== false : false;
   const ivuMunicipalEnabled = item.ivuMunicipalEnabled !== undefined ? item.ivuMunicipalEnabled !== false : false;
   const pricing = calculateItemPricing({
@@ -325,6 +316,60 @@ export const buildSpecialOrderPaymentSaleId = (payment = {}) => {
 export const shouldMirrorSpecialOrderPaymentToSale = (payment = {}) =>
   normalizeSpecialOrderPayment(payment).kind !== SPECIAL_ORDER_PAYMENT_KIND.refund;
 
+const buildSpecialOrderSaleItems = (order, paymentAmount) => {
+  const items = Array.isArray(order.items) ? order.items.map(normalizeSpecialOrderItem) : [];
+  const orderTotal = roundMoney(
+    order.totalAmount || items.reduce((sum, item) => sum + Number(item.total || item.taxableSubtotal || item.subtotal || 0), 0)
+  );
+
+  if (items.length === 0 || orderTotal <= 0 || paymentAmount <= 0) {
+    return [];
+  }
+
+  let allocatedTotal = 0;
+
+  return items.map((item, index) => {
+    const quantity = Math.max(1, Number(item.quantity || 1));
+    const sourceLineTotal = Number(item.total || item.taxableSubtotal || item.subtotal || 0);
+    const isLastItem = index === items.length - 1;
+    const lineTotal = isLastItem
+      ? roundMoney(paymentAmount - allocatedTotal)
+      : roundMoney(paymentAmount * (sourceLineTotal / orderTotal));
+    allocatedTotal = roundMoney(allocatedTotal + lineTotal);
+    const unitPrice = roundMoney(lineTotal / quantity);
+
+    return {
+      id: `item_${item.id}`,
+      productId: item.productId || '',
+      sourceSpecialOrderItemId: item.id,
+      name: item.name || item.description || 'Pieza de orden especial',
+      description: item.description || '',
+      sku: item.sku || '',
+      quantity,
+      unitType: item.unitType || 'unit',
+      price: unitPrice,
+      unitPrice,
+      unitCost: Number(item.unitCost || 0),
+      subtotal: lineTotal,
+      taxableSubtotal: lineTotal,
+      tax: 0,
+      taxBreakdown: {
+        state: 0,
+        municipal: 0
+      },
+      total: lineTotal,
+      ivuStateEnabled: false,
+      ivuMunicipalEnabled: false,
+      discountType: item.discountType || item.discount?.type || 'percentage',
+      discountValue: Number(item.discountValue ?? item.discount?.value ?? 0),
+      discountAmount: 0,
+      selectedSize: item.selectedSize || '',
+      isSpecialOrderItem: true,
+      referenceOrderNumber: order.orderNumber
+    };
+  }).filter((item) => item.total > 0);
+};
+
 export const buildSpecialOrderPaymentSale = ({ order, payment }) => {
   const normalizedOrder = normalizeSpecialOrder(order);
   const normalizedPayment = normalizeSpecialOrderPayment(payment);
@@ -332,6 +377,7 @@ export const buildSpecialOrderPaymentSale = ({ order, payment }) => {
   const normalizedMethod = normalizePaymentMethod(normalizedPayment.method);
   const paymentLabel = normalizedPayment.kind === SPECIAL_ORDER_PAYMENT_KIND.deposit ? 'Anticipo' : 'Pago';
   const amount = roundMoney(normalizedPayment.amount);
+  const detailedItems = buildSpecialOrderSaleItems(normalizedOrder, amount);
 
   return {
     id: saleId,
@@ -344,7 +390,7 @@ export const buildSpecialOrderPaymentSale = ({ order, payment }) => {
     specialOrderPaymentId: normalizedPayment.id,
     specialOrderPaymentKind: normalizedPayment.kind,
     customerName: normalizedOrder.customerName,
-    items: [
+    items: detailedItems.length > 0 ? detailedItems : [
       {
         id: `item_${normalizedPayment.id}`,
         productId: '',
