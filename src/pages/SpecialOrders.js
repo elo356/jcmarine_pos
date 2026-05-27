@@ -21,7 +21,7 @@ import {
   subscribeSpecialOrderPayments,
   subscribeSpecialOrders
 } from '../services/specialOrdersService';
-import { buildPaymentEntry } from '../utils/paymentUtils';
+import { buildPaymentEntry, PAYMENT_METHODS } from '../utils/paymentUtils';
 import {
   buildSpecialOrderPaymentSale,
   buildSpecialOrderAuditEntry,
@@ -766,14 +766,18 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
         description: auditEntry.description
       });
       setDetailOrder(persistedOrder);
-      showNotification(
-        'success',
-        isRefund
-          ? 'Reembolso registrado.'
-          : useTerminal
-            ? 'Pago por terminal registrado.'
-            : 'Pago registrado.'
-      );
+      let successMessage = 'Pago registrado.';
+      if (isRefund) {
+        successMessage = 'Reembolso registrado.';
+      } else if (useTerminal) {
+        successMessage = 'Pago por terminal registrado.';
+      } else if (method === PAYMENT_METHODS.ach) {
+        successMessage = 'Pago por ACH confirmado y transaccion guardada.';
+      } else if (method === PAYMENT_METHODS.athMovil) {
+        successMessage = 'Pago por ATH Móvil registrado.';
+      }
+
+      showNotification('success', successMessage);
     } catch (error) {
       console.error('Error applying special order payment:', error);
       showNotification('error', 'No se pudo registrar el movimiento.');
