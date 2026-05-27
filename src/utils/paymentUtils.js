@@ -2,9 +2,18 @@ export const PAYMENT_METHODS = {
   cash: 'cash',
   card: 'card',
   athMovil: 'ath_movil',
+  ach: 'ach',
   paypal: 'paypal',
   split: 'split'
 };
+
+export const PAYMENT_METHOD_OPTIONS = [
+  { value: PAYMENT_METHODS.cash, label: 'Efectivo' },
+  { value: PAYMENT_METHODS.card, label: 'Tarjeta' },
+  { value: PAYMENT_METHODS.ach, label: 'ACH' },
+  { value: PAYMENT_METHODS.athMovil, label: 'ATH Móvil' },
+  { value: PAYMENT_METHODS.paypal, label: 'PayPal' }
+];
 
 const LEGACY_PAYMENT_METHODS = {
   mobile: PAYMENT_METHODS.athMovil
@@ -23,6 +32,8 @@ export const getPaymentMethodLabel = (method) => {
       return 'Tarjeta';
     case PAYMENT_METHODS.athMovil:
       return 'ATH Móvil';
+    case PAYMENT_METHODS.ach:
+      return 'ACH';
     case PAYMENT_METHODS.paypal:
       return 'PayPal';
     case PAYMENT_METHODS.split:

@@ -343,6 +343,7 @@ export const buildStoreClosurePrintHtml = ({ summary, printerName = '' }) => {
       <div class="row"><span>Taxes</span><strong>${formatCurrency(summary.taxes)}</strong></div>
       <div class="row"><span>Total Tendered</span><strong>${formatCurrency(summary.totalTendered)}</strong></div>
       <div class="row"><span>Cash</span><strong>${formatCurrency(summary.tenders.cash)}</strong></div>
+      <div class="row"><span>ACH</span><strong>${formatCurrency(summary.tenders.ach || 0)}</strong></div>
       <div class="row"><span>ATH Móvil</span><strong>${formatCurrency(summary.tenders.athMovil)}</strong></div>
       <div class="row"><span>Tarjeta</span><strong>${formatCurrency(summary.tenders.card)}</strong></div>
         <div class="row"><span>PayPal</span><strong>${formatCurrency(summary.tenders.paypal || 0)}</strong></div>

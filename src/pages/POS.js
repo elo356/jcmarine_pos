@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Barcode, Plus, Minus, Trash2, ShoppingCart, CreditCard, Banknote, Smartphone } from 'lucide-react';
+import { Search, Barcode, Plus, Minus, Trash2, ShoppingCart, CreditCard, Banknote, Smartphone, Landmark } from 'lucide-react';
 import {
   loadData,
   saveData,
@@ -1184,6 +1184,27 @@ function POS({
     );
   };
 
+  const handleAchPayment = async () => {
+    const transactionId = generateId('sale');
+    const paymentEntries = [
+      buildPaymentEntry({
+        transactionId,
+        method: PAYMENT_METHODS.ach,
+        amount: total,
+        confirmedBy: currentOperator.name,
+        reference: paymentReference
+      })
+    ];
+
+    await finalizePayment(
+      paymentEntries,
+      {
+        successMessage: 'Pago por ACH confirmado y transaccion guardada.',
+        warningMessage: 'Pago por ACH confirmado localmente, pero fallo la sincronizacion con Firestore.'
+      }
+    );
+  };
+
   const handlePaypalPayment = async () => {
     const transactionId = generateId('sale');
     const paymentEntries = [
@@ -1829,6 +1850,14 @@ function POS({
                   <p className="font-medium">ATH Móvil</p>
                 </button>
                 <button
+                  onClick={() => setSelectedPaymentMethod(PAYMENT_METHODS.ach)}
+                  className="card p-6 hover:bg-teal-50 hover:border-teal-300 text-center transition-colors"
+                  disabled={Boolean(checkoutBlockReason)}
+                >
+                  <Landmark size={32} className="mx-auto mb-2 text-teal-600" />
+                  <p className="font-medium">ACH</p>
+                </button>
+                <button
                   onClick={() => setSelectedPaymentMethod(PAYMENT_METHODS.paypal)}
                   className="card p-6 hover:bg-sky-50 hover:border-sky-300 text-center transition-colors"
                   disabled={Boolean(checkoutBlockReason)}
@@ -2041,6 +2070,43 @@ function POS({
             </div>
           )}
 
+          {selectedPaymentMethod === PAYMENT_METHODS.ach && (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-teal-200 bg-teal-50 p-4">
+                <p className="font-medium text-teal-800">Pidele al cliente que complete el pago por ACH.</p>
+                <p className="text-sm text-teal-700">Verifica la transferencia antes de confirmarla aqui.</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Referencia (opcional)</label>
+                <input
+                  type="text"
+                  value={paymentReference}
+                  onChange={(e) => setPaymentReference(e.target.value)}
+                  className="input w-full"
+                  placeholder="Referencia o nota de ACH"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedPaymentMethod('')}
+                  className="flex-1 btn btn-secondary"
+                  disabled={isProcessingPayment}
+                >
+                  Atras
+                </button>
+                <button
+                  onClick={handleAchPayment}
+                  className="flex-1 btn btn-primary"
+                  disabled={isProcessingPayment || Boolean(checkoutBlockReason)}
+                >
+                  Confirmar pago ACH
+                </button>
+              </div>
+            </div>
+          )}
+
           {selectedPaymentMethod === PAYMENT_METHODS.paypal && (
             <div className="space-y-4">
               <div className="rounded-lg border border-sky-200 bg-sky-50 p-4">
@@ -2117,6 +2183,7 @@ function POS({
                         >
                           <option value={PAYMENT_METHODS.cash}>Efectivo</option>
                           <option value={PAYMENT_METHODS.card}>Tarjeta</option>
+                          <option value={PAYMENT_METHODS.ach}>ACH</option>
                           <option value={PAYMENT_METHODS.athMovil}>ATH MÃ³vil</option>
                           <option value={PAYMENT_METHODS.paypal}>PayPal</option>
                         </select>

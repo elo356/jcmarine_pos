@@ -307,6 +307,22 @@ const StorePage = () => {
         SPECIAL_ORDER_PAYMENT_KIND.payment
       )
     );
+    const achPayments = roundMoney(
+      paidSales
+        .reduce((sum, sale) => sum + getSaleTenderTotalByMethod(sale, PAYMENT_METHODS.ach), 0) +
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.ach,
+        SPECIAL_ORDER_PAYMENT_KIND.deposit
+      ) +
+      getStandaloneSpecialOrderPaymentTotal(
+        standalonePayments,
+        sales,
+        (payment) => normalizePaymentMethod(payment.method) === PAYMENT_METHODS.ach,
+        SPECIAL_ORDER_PAYMENT_KIND.payment
+      )
+    );
     const cardPayments = roundMoney(
       paidSales
         .reduce((sum, sale) => sum + getSaleTenderTotalByMethod(sale, PAYMENT_METHODS.card), 0) +
@@ -377,6 +393,7 @@ const StorePage = () => {
       totalTendered,
       tenders: {
         cash: cashPayments,
+        ach: achPayments,
         athMovil: athMovilPayments,
         card: cardPayments,
         paypal: paypalPayments
@@ -581,6 +598,7 @@ const StorePage = () => {
       totalTendered: roundMoney(log.summary?.sales?.totalTendered ?? 0),
       tenders: {
         cash: roundMoney(log.summary?.sales?.cash ?? 0),
+        ach: roundMoney(log.summary?.sales?.ach ?? 0),
         athMovil: roundMoney(log.summary?.sales?.athMovil ?? 0),
         card: roundMoney(log.summary?.sales?.card ?? 0),
         paypal: roundMoney(log.summary?.sales?.paypal ?? 0)

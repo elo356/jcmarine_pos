@@ -6,6 +6,7 @@ import Select from '../Select';
 import CustomerLookupSection from './CustomerLookupSection';
 import { formatCurrency, formatQuantity, getPrimaryProductBarcode, getProductBarcodes, getProductSkuReferences } from '../../data/demoData';
 import { calculateItemPricing, IVU_MUNICIPAL_RATE, IVU_STATE_RATE, roundMoney } from '../../utils/cartPricing';
+import { PAYMENT_METHOD_OPTIONS } from '../../utils/paymentUtils';
 import { fileToTxt } from '../../utils/fileToTxt';
 
 const DEFAULT_ITEM_DISCOUNT = { type: 'percentage', value: 0 };
@@ -593,12 +594,7 @@ function SpecialOrderForm({
             label="Método del anticipo"
             value={depositMethod}
             onChange={(e) => setDepositMethod(e.target.value)}
-            options={[
-              { value: 'cash', label: 'Efectivo' },
-              { value: 'card', label: 'Tarjeta' },
-              { value: 'ath_movil', label: 'ATH Móvil' },
-              { value: 'paypal', label: 'PayPal' }
-            ]}
+            options={PAYMENT_METHOD_OPTIONS}
           />
         </div>
 

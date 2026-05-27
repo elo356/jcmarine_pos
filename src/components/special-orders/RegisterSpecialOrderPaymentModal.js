@@ -3,13 +3,7 @@ import Modal from '../Modal';
 import Input from '../Input';
 import Select from '../Select';
 import { formatCurrency } from '../../data/demoData';
-
-const PAYMENT_METHOD_OPTIONS = [
-  { value: 'cash', label: 'Efectivo' },
-  { value: 'card', label: 'Tarjeta' },
-  { value: 'ath_movil', label: 'ATH Movil' },
-  { value: 'paypal', label: 'PayPal' }
-];
+import { PAYMENT_METHOD_OPTIONS } from '../../utils/paymentUtils';
 
 const CARD_PAYMENT_MODES = {
   terminal: 'terminal',

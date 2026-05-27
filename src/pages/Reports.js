@@ -258,6 +258,7 @@ const Reports = () => {
     const methodSales = {
       cash: 0,
       card: 0,
+      ach: 0,
       ath_movil: 0,
       split: 0
     };
@@ -455,6 +456,7 @@ const Reports = () => {
                 <h3>Metodos de pago</h3>
                 <div class="metric"><span>Efectivo</span><strong>${formatCurrency(paymentMethods.cash)}</strong></div>
                 <div class="metric"><span>Tarjeta</span><strong>${formatCurrency(paymentMethods.card)}</strong></div>
+                <div class="metric"><span>ACH</span><strong>${formatCurrency(paymentMethods.ach)}</strong></div>
                 <div class="metric"><span>ATH Movil</span><strong>${formatCurrency(paymentMethods.ath_movil)}</strong></div>
                 <div class="metric"><span>Split</span><strong>${formatCurrency(paymentMethods.split)}</strong></div>
               </div>
@@ -796,6 +798,15 @@ const Reports = () => {
                 : 0}% del total
             </div>
           </div>
+          <div className="p-4 bg-teal-50 rounded-lg text-center">
+            <div className="text-2xl font-bold text-teal-600">{formatCurrency(paymentMethods.ach)}</div>
+            <div className="text-sm text-gray-600 mt-1">Pagos por ACH</div>
+            <div className="text-xs text-gray-500">
+              {metrics.totalRevenue > 0 
+                ? Math.round((paymentMethods.ach / metrics.totalRevenue) * 100) 
+                : 0}% del total
+            </div>
+          </div>
           <div className="p-4 bg-purple-50 rounded-lg text-center">
             <div className="text-2xl font-bold text-purple-600">{formatCurrency(paymentMethods.ath_movil)}</div>
             <div className="text-sm text-gray-600 mt-1">Pagos por ATH Movil</div>
@@ -805,7 +816,7 @@ const Reports = () => {
                 : 0}% del total
             </div>
           </div>
-          <div className="p-4 bg-amber-50 rounded-lg text-center">
+          <div className="p-4 bg-amber-50 rounded-lg text-center md:col-span-4">
             <div className="text-2xl font-bold text-amber-600">{formatCurrency(paymentMethods.split)}</div>
             <div className="text-sm text-gray-600 mt-1">Ventas split</div>
             <div className="text-xs text-gray-500">
