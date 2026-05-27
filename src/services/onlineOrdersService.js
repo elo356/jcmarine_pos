@@ -6,14 +6,11 @@ const ONLINE_STORE_SETTINGS_COLLECTION = 'onlineStoreSettings';
 const ONLINE_STORE_SETTINGS_DOC = 'config';
 
 export const DEFAULT_ONLINE_STORE_SETTINGS = {
+  storeEnabled: true,
   shippingEnabled: true,
   pickupEnabled: true,
   shippingFlatRate: 0,
-  freeShippingMinimum: 0,
-  maxShippingOrderItems: 0,
-  maxShippingOrderQuantity: 0,
-  maxQuantityPerLineItem: 0,
-  shippingPolicyNote: ''
+  freeShippingMinimum: 0
 };
 
 const normalizeDateValue = (value) => {
@@ -106,14 +103,11 @@ export const normalizeOnlineOrder = (order = {}) => {
 };
 
 export const normalizeOnlineStoreSettings = (settings = {}) => ({
+  storeEnabled: normalizeBoolean(settings.storeEnabled, DEFAULT_ONLINE_STORE_SETTINGS.storeEnabled),
   shippingEnabled: normalizeBoolean(settings.shippingEnabled, DEFAULT_ONLINE_STORE_SETTINGS.shippingEnabled),
   pickupEnabled: normalizeBoolean(settings.pickupEnabled, DEFAULT_ONLINE_STORE_SETTINGS.pickupEnabled),
   shippingFlatRate: normalizeNumber(settings.shippingFlatRate, DEFAULT_ONLINE_STORE_SETTINGS.shippingFlatRate),
   freeShippingMinimum: normalizeNumber(settings.freeShippingMinimum, DEFAULT_ONLINE_STORE_SETTINGS.freeShippingMinimum),
-  maxShippingOrderItems: normalizeNumber(settings.maxShippingOrderItems, DEFAULT_ONLINE_STORE_SETTINGS.maxShippingOrderItems),
-  maxShippingOrderQuantity: normalizeNumber(settings.maxShippingOrderQuantity, DEFAULT_ONLINE_STORE_SETTINGS.maxShippingOrderQuantity),
-  maxQuantityPerLineItem: normalizeNumber(settings.maxQuantityPerLineItem, DEFAULT_ONLINE_STORE_SETTINGS.maxQuantityPerLineItem),
-  shippingPolicyNote: normalizeText(settings.shippingPolicyNote),
   updatedAt: normalizeDateValue(settings.updatedAt),
   updatedBy: normalizeText(settings.updatedBy),
   updatedById: normalizeText(settings.updatedById)

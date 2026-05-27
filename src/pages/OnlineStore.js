@@ -91,25 +91,19 @@ const isOnlineOrderCancellable = (order) => {
 };
 
 const buildSettingsForm = (settings = DEFAULT_ONLINE_STORE_SETTINGS) => ({
+  storeEnabled: settings.storeEnabled === true,
   shippingEnabled: settings.shippingEnabled === true,
   pickupEnabled: settings.pickupEnabled === true,
   shippingFlatRate: String(settings.shippingFlatRate ?? 0),
-  freeShippingMinimum: String(settings.freeShippingMinimum ?? 0),
-  maxShippingOrderItems: String(settings.maxShippingOrderItems ?? 0),
-  maxShippingOrderQuantity: String(settings.maxShippingOrderQuantity ?? 0),
-  maxQuantityPerLineItem: String(settings.maxQuantityPerLineItem ?? 0),
-  shippingPolicyNote: settings.shippingPolicyNote || ''
+  freeShippingMinimum: String(settings.freeShippingMinimum ?? 0)
 });
 
 const parseSettingsForm = (form) => ({
+  storeEnabled: form.storeEnabled === true,
   shippingEnabled: form.shippingEnabled === true,
   pickupEnabled: form.pickupEnabled === true,
   shippingFlatRate: Number(form.shippingFlatRate || 0),
-  freeShippingMinimum: Number(form.freeShippingMinimum || 0),
-  maxShippingOrderItems: Number(form.maxShippingOrderItems || 0),
-  maxShippingOrderQuantity: Number(form.maxShippingOrderQuantity || 0),
-  maxQuantityPerLineItem: Number(form.maxQuantityPerLineItem || 0),
-  shippingPolicyNote: String(form.shippingPolicyNote || '').trim()
+  freeShippingMinimum: Number(form.freeShippingMinimum || 0)
 });
 
 const OnlineStore = () => {
@@ -230,10 +224,7 @@ const OnlineStore = () => {
     const nextSettings = parseSettingsForm(settingsForm);
     const numericFields = [
       nextSettings.shippingFlatRate,
-      nextSettings.freeShippingMinimum,
-      nextSettings.maxShippingOrderItems,
-      nextSettings.maxShippingOrderQuantity,
-      nextSettings.maxQuantityPerLineItem
+      nextSettings.freeShippingMinimum
     ];
 
     if (numericFields.some((value) => !Number.isFinite(value) || value < 0)) {
@@ -251,7 +242,7 @@ const OnlineStore = () => {
       setOnlineStoreSettings(saved);
       setSettingsForm(buildSettingsForm(saved));
       setShowSettingsModal(false);
-      setNotification({ type: 'success', message: 'Settings de tienda online guardados.' });
+      setNotification({ type: 'success', message: 'Configuracion de tienda online guardada.' });
     } catch (error) {
       console.error('Error saving online store settings:', error);
       setNotification({ type: 'error', message: 'No se pudo guardar la configuracion de tienda online.' });
@@ -314,16 +305,30 @@ const OnlineStore = () => {
           <Globe2 className="text-primary-600" size={28} />
           <div>
             <h1 className="page-title">Tienda online</h1>
-            <p className="text-sm text-gray-500">Ordenes cargadas desde Firebase en la coleccion onlineOrders.</p>
+            <p className="text-sm text-gray-500">Ordenes cargadas desde Firebase y configuracion en onlineStoreSettings/config.</p>
           </div>
         </div>
         <button type="button" onClick={openSettingsModal} className="btn-secondary">
           <Settings size={16} />
-          Settings
+          Configuracion
         </button>
       </div>
 
+      {!onlineStoreSettings.storeEnabled && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900">
+          La tienda esta apagada. El website deberia ocultar compras y mostrar solo informacion basica.
+        </div>
+      )}
+
       <div className="stats-grid">
+        <div className="card">
+          <div className="stat-label">Tienda</div>
+          <div className="stat-value">{onlineStoreSettings.storeEnabled ? 'Activa' : 'Apagada'}</div>
+          <div className="stat-trend text-gray-500">
+            <Globe2 size={16} />
+            Control principal
+          </div>
+        </div>
         <div className="card">
           <div className="stat-label">Ordenes online</div>
           <div className="stat-value">{onlineOrderSummary.totalOrders}</div>
@@ -361,6 +366,10 @@ const OnlineStore = () => {
       <div className="card p-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
           <div>
+            <p className="text-gray-500">Estado</p>
+            <p className="font-semibold text-gray-900">{onlineStoreSettings.storeEnabled ? 'Abierta' : 'Apagada'}</p>
+          </div>
+          <div>
             <p className="text-gray-500">Envio</p>
             <p className="font-semibold text-gray-900">
               {onlineStoreSettings.shippingEnabled ? formatCurrency(onlineStoreSettings.shippingFlatRate) : 'Desactivado'}
@@ -370,12 +379,6 @@ const OnlineStore = () => {
             <p className="text-gray-500">Envio gratis desde</p>
             <p className="font-semibold text-gray-900">
               {onlineStoreSettings.freeShippingMinimum > 0 ? formatCurrency(onlineStoreSettings.freeShippingMinimum) : 'No aplica'}
-            </p>
-          </div>
-          <div>
-            <p className="text-gray-500">Maximo por envio</p>
-            <p className="font-semibold text-gray-900">
-              {onlineStoreSettings.maxShippingOrderQuantity > 0 ? `${onlineStoreSettings.maxShippingOrderQuantity} unidades` : 'Sin limite'}
             </p>
           </div>
           <div>
@@ -708,22 +711,36 @@ const OnlineStore = () => {
         <Modal
           isOpen={showSettingsModal}
           onClose={() => !isSavingSettings && setShowSettingsModal(false)}
-          title="Settings de tienda online"
+          title="Configuracion de tienda online"
           size="lg"
         >
           <div className="space-y-5">
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
               <p className="font-semibold text-blue-900">Firebase: onlineStoreSettings/config</p>
               <p className="text-sm text-blue-700">
-                La tienda online debe leer este documento para calcular envio y validar limites antes de crear una orden.
+                La tienda online debe leer este documento para saber si la tienda esta activa y que metodos de entrega mostrar.
               </p>
             </div>
+
+            <label className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 p-4">
+              <span>
+                <span className="block font-medium text-gray-900">Tienda abierta</span>
+                <span className="text-sm text-gray-500">Cuando esta apagada, el website no debe permitir compras.</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={settingsForm.storeEnabled}
+                onChange={(e) => updateSettingsField('storeEnabled', e.target.checked)}
+                className="h-5 w-5"
+                disabled={isSavingSettings}
+              />
+            </label>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <label className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 p-4">
                 <span>
                   <span className="block font-medium text-gray-900">Permitir envios</span>
-                  <span className="text-sm text-gray-500">Si esta apagado, la tienda no debe ofrecer shipping.</span>
+                  <span className="text-sm text-gray-500">Si esta apagado, la tienda solo mostrara pickup.</span>
                 </span>
                 <input
                   type="checkbox"
@@ -747,9 +764,7 @@ const OnlineStore = () => {
                   disabled={isSavingSettings}
                 />
               </label>
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Costo fijo de envio</label>
                 <input
@@ -775,56 +790,6 @@ const OnlineStore = () => {
                 />
                 <p className="mt-1 text-xs text-gray-500">Usa 0 para no ofrecer envio gratis automatico.</p>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Maximo de lineas por orden con envio</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={settingsForm.maxShippingOrderItems}
-                  onChange={(e) => updateSettingsField('maxShippingOrderItems', e.target.value)}
-                  className="input w-full"
-                  disabled={isSavingSettings}
-                />
-                <p className="mt-1 text-xs text-gray-500">Usa 0 para no limitar cantidad de productos distintos.</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Maximo de unidades por orden con envio</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={settingsForm.maxShippingOrderQuantity}
-                  onChange={(e) => updateSettingsField('maxShippingOrderQuantity', e.target.value)}
-                  className="input w-full"
-                  disabled={isSavingSettings}
-                />
-                <p className="mt-1 text-xs text-gray-500">Usa 0 para no limitar unidades totales.</p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Maximo de unidades por producto</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={settingsForm.maxQuantityPerLineItem}
-                  onChange={(e) => updateSettingsField('maxQuantityPerLineItem', e.target.value)}
-                  className="input w-full"
-                  disabled={isSavingSettings}
-                />
-                <p className="mt-1 text-xs text-gray-500">Usa 0 para no limitar cantidad por linea.</p>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Nota/politica de envio</label>
-              <textarea
-                value={settingsForm.shippingPolicyNote}
-                onChange={(e) => updateSettingsField('shippingPolicyNote', e.target.value)}
-                className="input w-full min-h-[6rem]"
-                placeholder="Ej. Enviamos solo dentro de Puerto Rico. Ordenes grandes requieren confirmacion."
-                disabled={isSavingSettings}
-              />
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
