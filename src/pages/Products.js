@@ -30,6 +30,7 @@ import useIsMobileDevice from '../hooks/useIsMobileDevice';
 import useScannerHidStatus from '../hooks/useScannerHidStatus';
 import useScannerKeyboardInput from '../hooks/useScannerKeyboardInput';
 import { getCameraAccessErrorMessage, startCameraBarcodeScanner } from '../utils/cameraBarcodeScanner';
+import { fileToTxt } from '../utils/fileToTxt';
 
 function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   const { user, profile } = useAuth();
@@ -107,7 +108,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     sizeStocks: [],
     ivuStateEnabled: true,
     ivuMunicipalEnabled: true,
-    linkedProductIds: []
+    linkedProductIds: [],
+    image: null
   });
   const categoryColorPalette = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316'];
   const buildEditableBarcodes = useCallback(
@@ -578,7 +580,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sizeStocks: buildEditableSizeStocks(product.sizeStocks, product.availableSizes, product.stock),
         ivuStateEnabled: product.ivuStateEnabled !== false,
         ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false,
-        linkedProductIds: product.linkedProductIds || []
+        linkedProductIds: product.linkedProductIds || [],
+        image: product.image || null
       });
       setActiveBarcodeFieldIndex(0);
     } else {
@@ -602,7 +605,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sizeStocks: [{ size: '', stock: '' }],
         ivuStateEnabled: true,
         ivuMunicipalEnabled: true,
-        linkedProductIds: []
+        linkedProductIds: [],
+        image: null
       });
       setActiveBarcodeFieldIndex(0);
     }
@@ -631,7 +635,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       sizeStocks: [{ size: '', stock: '' }],
       ivuStateEnabled: true,
       ivuMunicipalEnabled: true,
-      linkedProductIds: []
+      linkedProductIds: [],
+      image: null
     });
     setActiveBarcodeFieldIndex(0);
   };
@@ -809,7 +814,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
             sizeStocks,
             ivuStateEnabled: formData.ivuStateEnabled,
             ivuMunicipalEnabled: formData.ivuMunicipalEnabled,
-            linkedProductIds
+            linkedProductIds,
+            image: formData.image || null
           };
         }
         return p;
@@ -866,7 +872,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sizeStocks,
         ivuStateEnabled: formData.ivuStateEnabled,
         ivuMunicipalEnabled: formData.ivuMunicipalEnabled,
-        image: null,
+        image: formData.image || null,
         linkedProductIds
       };
 
@@ -1777,6 +1783,29 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                 className="input w-full h-20"
                 placeholder="Descripción del producto..."
               />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Foto (opcional)</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={async (e) => {
+                    const file = e?.target?.files?.[0];
+                    if (!file) return;
+                    try {
+                      const txt = await fileToTxt(file);
+                      setFormData((current) => ({ ...current, image: txt }));
+                    } catch (err) {
+                      console.error('Error leyendo imagen del producto:', err);
+                    }
+                  }}
+                />
+                {formData.image && (
+                  <img src={formData.image} alt="preview" className="h-20 w-20 object-cover rounded border" />
+                )}
+              </div>
             </div>
 
             <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4 rounded-lg border border-gray-200 p-4">

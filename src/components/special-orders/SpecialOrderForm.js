@@ -6,6 +6,7 @@ import Select from '../Select';
 import CustomerLookupSection from './CustomerLookupSection';
 import { formatCurrency, formatQuantity, getPrimaryProductBarcode, getProductBarcodes, getProductSkuReferences } from '../../data/demoData';
 import { calculateItemPricing, IVU_MUNICIPAL_RATE, IVU_STATE_RATE, roundMoney } from '../../utils/cartPricing';
+import { fileToTxt } from '../../utils/fileToTxt';
 
 const DEFAULT_ITEM_DISCOUNT = { type: 'percentage', value: 0 };
 
@@ -25,7 +26,8 @@ const createEmptyItem = () => ({
   unitPrice: '',
   discount: { ...DEFAULT_ITEM_DISCOUNT },
   ivuStateEnabled: true,
-  ivuMunicipalEnabled: true
+  ivuMunicipalEnabled: true,
+  image: null
 });
 
 function SpecialOrderForm({
@@ -136,7 +138,8 @@ function SpecialOrderForm({
       unitPrice: item.unitPrice ?? '',
       discount: normalizeItemDiscount(item.discount),
       ivuStateEnabled: item.ivuStateEnabled !== false,
-      ivuMunicipalEnabled: item.ivuMunicipalEnabled !== false
+      ivuMunicipalEnabled: item.ivuMunicipalEnabled !== false,
+      image: item.image || null
     })));
     setDepositAmount(String(initialData.depositAmount || 0));
     setDepositMethod(initialData.depositMethod || initialData.payments?.[0]?.method || 'cash');
@@ -163,6 +166,17 @@ function SpecialOrderForm({
     setItemSearchQuery('');
     setSelectedCategory('all');
     setErrors({});
+  };
+
+  const handleItemImageChange = async (index, e) => {
+    const file = e?.target?.files?.[0];
+    if (!file) return;
+    try {
+      const txt = await fileToTxt(file);
+      updateItem(index, { image: txt });
+    } catch (err) {
+      console.error('Error leyendo imagen:', err);
+    }
   };
 
   const handleClose = () => {
@@ -205,7 +219,8 @@ function SpecialOrderForm({
           unitPrice: product.price ?? '',
           discount: { ...DEFAULT_ITEM_DISCOUNT },
           ivuStateEnabled: product.ivuStateEnabled !== false,
-          ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false
+          ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false,
+          image: null
         }
       ];
     });
@@ -420,6 +435,19 @@ function SpecialOrderForm({
                         >
                           <Trash2 size={16} />
                         </button>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <label className="text-sm text-gray-700">Foto (opcional)</label>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleItemImageChange(index, e)}
+                          className="text-sm"
+                        />
+                        {item.image && (
+                          <img src={item.image} alt={`item-${index}`} className="h-16 w-16 object-cover rounded border" />
+                        )}
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
