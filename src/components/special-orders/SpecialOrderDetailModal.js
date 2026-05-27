@@ -185,7 +185,7 @@ function SpecialOrderDetailModal({
                   <th>Costo</th>
                   <th>Precio</th>
                   <th>Subtotal</th>
-                  <th>Total</th>
+                  <th>Total neto</th>
                 </tr>
               </thead>
               <tbody>
@@ -205,7 +205,7 @@ function SpecialOrderDetailModal({
                     <td>{formatCurrency(item.unitCost || 0)}</td>
                     <td>{formatCurrency(item.unitPrice || 0)}</td>
                     <td>{formatCurrency(item.subtotal || 0)}</td>
-                    <td>{formatCurrency(item.total ?? item.taxableSubtotal ?? 0)}</td>
+                    <td>{formatCurrency(item.taxableSubtotal ?? item.total ?? 0)}</td>
                   </tr>
                 ))}
               </tbody>
