@@ -713,6 +713,7 @@ const StorePage = () => {
           taxes: closeSummary.taxes,
           totalTendered: closeSummary.totalTendered,
           cash: closeSummary.tenders.cash,
+          ach: closeSummary.tenders.ach,
           athMovil: closeSummary.tenders.athMovil,
           card: closeSummary.tenders.card,
           paypal: closeSummary.tenders.paypal

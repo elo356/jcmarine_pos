@@ -116,6 +116,9 @@ const Reports = () => {
       .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   };
 
+  const getSaleItemKey = (saleId, item = {}, index = 0) =>
+    `${saleId}::${item.productId || item.sourceSpecialOrderItemId || item.id || 'item'}::${index}`;
+
   const getRefundsInDateRange = () => {
     const start = parseLocalDate(startDate, false);
     const end = parseLocalDate(endDate, true);
@@ -230,15 +233,27 @@ const Reports = () => {
     const categorySales = {};
 
     filteredSales.forEach(sale => {
-      sale.items.forEach(item => {
+      const saleRefunds = getSaleRefunds(sale);
+      sale.items.forEach((item, index) => {
         if (!item.productId || item.nonInventory) return;
+        const refundedCount = saleRefunds.reduce((sum, refund) => (
+          sum + (refund.items || []).reduce((itemSum, refundedItem) => (
+            refundedItem.saleItemKey === getSaleItemKey(sale.id, item, index)
+              ? itemSum + Number(refundedItem.quantity || 0)
+              : itemSum
+          ), 0)
+        ), 0);
+
+        const quantity = Math.max(0, Number(item.quantity || 0) - refundedCount);
+        if (quantity <= 0) return;
+
         const product = products.find(p => p.id === item.productId);
         if (product) {
           if (!categorySales[product.category]) {
             categorySales[product.category] = { revenue: 0, items: 0 };
           }
-          categorySales[product.category].revenue += item.price * item.quantity;
-          categorySales[product.category].items += item.quantity;
+          categorySales[product.category].revenue += item.price * quantity;
+          categorySales[product.category].items += quantity;
         }
       });
     });
@@ -324,17 +339,29 @@ const Reports = () => {
     const productSales = {};
 
     filteredSales.forEach(sale => {
-      sale.items.forEach(item => {
+      const saleRefunds = getSaleRefunds(sale);
+      sale.items.forEach((item, index) => {
         if (!item.productId || item.nonInventory) return;
+        const refundedCount = saleRefunds.reduce((sum, refund) => (
+          sum + (refund.items || []).reduce((itemSum, refundedItem) => (
+            refundedItem.saleItemKey === getSaleItemKey(sale.id, item, index)
+              ? itemSum + Number(refundedItem.quantity || 0)
+              : itemSum
+          ), 0)
+        ), 0);
+
+        const quantity = Math.max(0, Number(item.quantity || 0) - refundedCount);
+        if (quantity <= 0) return;
+
         if (!productSales[item.productId]) {
-          productSales[item.productId] = { 
-            name: item.name, 
-            quantity: 0, 
-            revenue: 0 
+          productSales[item.productId] = {
+            name: item.name,
+            quantity: 0,
+            revenue: 0
           };
         }
-        productSales[item.productId].quantity += item.quantity;
-        productSales[item.productId].revenue += item.price * item.quantity;
+        productSales[item.productId].quantity += quantity;
+        productSales[item.productId].revenue += item.price * quantity;
       });
     });
 
