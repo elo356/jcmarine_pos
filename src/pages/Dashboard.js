@@ -13,7 +13,7 @@ import { subscribeSales } from '../services/salesService';
 import { subscribeProducts } from '../services/inventoryService';
 import { subscribeEmployees } from '../services/employeesService';
 import { getPaymentMethodLabel, normalizePaymentMethod } from '../utils/paymentUtils';
-import { getNetSaleTotal, isRefundedSale, isReportableSale } from '../utils/salesUtils';
+import { getNetSaleTotal, getSaleRefundTotalFrom, isRefundedSale, isReportableSale } from '../utils/salesUtils';
 import { subscribeSpecialOrderPayments, subscribeSpecialOrders } from '../services/specialOrdersService';
 import {
   getStandaloneSpecialOrderPaymentNet,
@@ -71,6 +71,8 @@ function Dashboard() {
     
     const paidSales = sales.filter(isReportableSale);
     const todaySales = paidSales.filter(s => new Date(s.date) >= today);
+    const todaySalesGross = todaySales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+    const todayRefunds = sales.reduce((sum, sale) => sum + getSaleRefundTotalFrom(sale, today), 0);
     const totalStandaloneSpecialRevenue = getStandaloneSpecialOrderPaymentNet(specialOrderPayments, sales);
     const todayStandaloneSpecialRevenue = getStandaloneSpecialOrderPaymentNet(
       specialOrderPayments,
@@ -78,7 +80,7 @@ function Dashboard() {
       (payment) => new Date(payment.createdAt || payment.confirmed_at) >= today
     );
     const totalRevenue = paidSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + totalStandaloneSpecialRevenue;
-    const todayRevenue = todaySales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + todayStandaloneSpecialRevenue;
+    const todayRevenue = todaySalesGross + todayStandaloneSpecialRevenue - todayRefunds;
     const lowStock = products.filter(p => p.stock <= p.lowStockThreshold);
     const readyOrders = hydratedSpecialOrders.filter((order) => order.orderStatus === SPECIAL_ORDER_STATUS.ready_for_pickup);
     const pendingBalance = hydratedSpecialOrders
