@@ -745,7 +745,7 @@ function Sales() {
       data.sales || [],
       specialOrders.length > 0 ? specialOrders : (data.specialOrders || [])
     )
-      .find((sale) => sale.id === refundTarget.id);
+      .find((sale) => sale.id === refundTarget.id) || refundTarget;
 
     if (!targetSale) {
       showNotification('error', 'No se encontró la venta para registrar el reembolso.');
