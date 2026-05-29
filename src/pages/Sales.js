@@ -646,9 +646,7 @@ function Sales() {
           Number(selectedRefundItem.availableToRefund || 1)
         )
       : 0;
-    const refundAmount = selectedRefundItem
-      ? roundMoney(refundQuantity * Number(selectedRefundItem.unitAmount || 0))
-      : Number(refundForm.amount || 0);
+    const refundAmount = roundMoney(Number(refundForm.amount || 0));
     const maxRefund = Math.max(0, Number(refundTarget.total || 0) - getSaleRefundTotal(refundTarget));
 
     if (!selectedRefundItem) {
@@ -683,7 +681,7 @@ function Sales() {
           name: selectedRefundItem.item.name,
           selectedSize: selectedRefundItem.item.selectedSize || '',
           quantity: refundQuantity,
-          unitAmount: selectedRefundItem.unitAmount,
+          unitAmount: refundQuantity > 0 ? roundMoney(refundAmount / refundQuantity) : selectedRefundItem.unitAmount,
           amount: refundAmount
         }
       ],
@@ -1417,9 +1415,10 @@ function Sales() {
                   min="0"
                   step="0.01"
                   value={refundForm.amount}
-                  readOnly
-                  className="input w-full bg-gray-100"
+                  onChange={(e) => setRefundForm((current) => ({ ...current, amount: e.target.value }))}
+                  className="input w-full"
                 />
+                <p className="mt-1 text-xs text-gray-500">Puedes ajustar este monto manualmente si el refund no es por el total de la pieza.</p>
               </div>
             </div>
 
@@ -1432,7 +1431,9 @@ function Sales() {
               >
                 <option value="cash">Efectivo</option>
                 <option value="card">Tarjeta</option>
+                <option value="ach">ACH</option>
                 <option value="ath_movil">ATH Móvil</option>
+                <option value="paypal">PayPal</option>
               </select>
             </div>
 
