@@ -262,6 +262,42 @@ function Sales() {
   );
   const refundItemOptions = useMemo(() => {
     if (!refundTarget) return [];
+    // If this is a legacy special-order payment sale, prefer original order item pricing
+    if (isLegacySpecialOrderPaymentSale(refundTarget)) {
+      const order = findSpecialOrderForSale(refundTarget, specialOrders);
+      if (order) {
+        const orderSummary = getSpecialOrderFinancialSummary(order);
+        const orderItems = orderSummary.items || [];
+        return orderItems
+          .map((orderItem) => {
+            // find corresponding mirrored sale item by sourceSpecialOrderItemId
+            const mirroredIndex = (refundTarget.items || []).findIndex((si) => String(si.sourceSpecialOrderItemId) === String(orderItem.id));
+            const mirroredItem = mirroredIndex >= 0 ? (refundTarget.items || [])[mirroredIndex] : null;
+            const saleItemKey = mirroredItem ? getSaleItemKey(refundTarget.id, mirroredItem, mirroredIndex) : getSaleItemKey(refundTarget.id, { sourceSpecialOrderItemId: orderItem.id }, 0);
+
+            const refundedCount = getSaleRefunds(refundTarget).reduce((sum, refund) => (
+              sum + (refund.items || []).reduce((itemSum, refundedItem) => (
+                refundedItem.saleItemKey === saleItemKey
+                  ? itemSum + Number(refundedItem.quantity || 0)
+                  : itemSum
+              ), 0)
+            ), 0);
+
+            const quantity = Math.max(0, Number(orderItem.quantity || 0));
+            const availableToRefund = Math.max(0, quantity - refundedCount);
+            const unitAmount = quantity > 0 ? roundMoney(orderItem.total / quantity) : 0;
+
+            return availableToRefund > 0 ? {
+              saleItemKey,
+              index: mirroredIndex >= 0 ? mirroredIndex : 0,
+              item: mirroredItem || { id: orderItem.id, name: orderItem.name },
+              availableToRefund,
+              unitAmount
+            } : null;
+          })
+          .filter(Boolean);
+      }
+    }
 
     return (refundTarget.items || [])
       .map((item, index) => {
@@ -289,7 +325,7 @@ function Sales() {
         };
       })
       .filter((entry) => entry && entry.availableToRefund > 0);
-  }, [refundTarget]);
+  }, [refundTarget, specialOrders]);
   const selectedRefundItem = useMemo(
     () => refundItemOptions.find((entry) => entry.saleItemKey === refundForm.saleItemKey) || null,
     [refundForm.saleItemKey, refundItemOptions]
