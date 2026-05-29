@@ -665,16 +665,11 @@ function Sales() {
           Math.max(1, Number(refundForm.quantity || 1)),
           Number(selectedRefundItem.availableToRefund || 1)
         )
-      : 0;
+      : 1;
     const refundAmount = roundMoney(Number(refundForm.amount || 0));
     const maxRefund = Math.max(0, Number(refundTarget.total || 0) - getSaleRefundTotal(refundTarget));
 
-    if (!selectedRefundItem) {
-      showNotification('error', 'Selecciona el producto que vas a reembolsar.');
-      return;
-    }
-
-    if (refundQuantity <= 0 || refundQuantity > Number(selectedRefundItem.availableToRefund || 0)) {
+    if (selectedRefundItem && (refundQuantity <= 0 || refundQuantity > Number(selectedRefundItem.availableToRefund || 0))) {
       showNotification('error', 'La cantidad a reembolsar no esta disponible para ese producto.');
       return;
     }
@@ -694,7 +689,7 @@ function Sales() {
       method: refundForm.method || normalizePaymentMethod(refundTarget.paymentMethod) || 'cash',
       reason: refundForm.reason,
       notes: refundForm.notes,
-      items: [
+      items: selectedRefundItem ? [
         {
           saleItemKey: selectedRefundItem.saleItemKey,
           productId: selectedRefundItem.item.productId || selectedRefundItem.item.sourceSpecialOrderItemId || '',
@@ -704,7 +699,7 @@ function Sales() {
           unitAmount: refundQuantity > 0 ? roundMoney(refundAmount / refundQuantity) : selectedRefundItem.unitAmount,
           amount: refundAmount
         }
-      ],
+      ] : [],
       refundedBy: profile?.name || user?.email || 'Sistema',
       refundedAt: new Date().toISOString()
     });
@@ -1407,7 +1402,7 @@ function Sales() {
                 }))}
                 className="input w-full"
               >
-                <option value="">Selecciona un producto</option>
+                <option value="">Ningún artículo (reembolso por monto)</option>
                 {refundItemOptions.map((option) => (
                   <option key={option.saleItemKey} value={option.saleItemKey}>
                     {option.item.name}
@@ -1432,6 +1427,7 @@ function Sales() {
                   value={refundForm.quantity}
                   onChange={(e) => setRefundForm((current) => ({ ...current, quantity: e.target.value }))}
                   className="input w-full"
+                  disabled={!selectedRefundItem}
                 />
               </div>
               <div>
