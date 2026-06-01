@@ -16,6 +16,7 @@ import { formatCurrency, formatDate } from '../data/demoData';
 import { subscribeSales } from '../services/salesService';
 import { subscribeShifts } from '../services/shiftsService';
 import { saveWeeklyShiftClosure, subscribeWeeklyShiftClosures } from '../services/weeklyShiftClosureService';
+import { DEFAULT_SYSTEM_SETTINGS, subscribeSystemSettings } from '../services/settingsService';
 import { useAuth } from '../contexts/AuthContext';
 import { useRoleDefinitions } from '../hooks/useRoleDefinitions';
 import {
@@ -45,6 +46,7 @@ const Employees = () => {
   const [sales, setSales] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [weeklyShiftClosures, setWeeklyShiftClosures] = useState([]);
+  const [systemSettings, setSystemSettings] = useState(DEFAULT_SYSTEM_SETTINGS);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -59,6 +61,7 @@ const Employees = () => {
     let unsubSales = null;
     let unsubShifts = null;
     let unsubWeekly = null;
+    let unsubSettings = null;
 
     const start = async () => {
       try {
@@ -88,6 +91,10 @@ const Employees = () => {
         (rows) => setWeeklyShiftClosures(rows || []),
         (error) => console.error('No se pudieron cargar cierres semanales:', error)
       );
+      unsubSettings = subscribeSystemSettings(
+        (settings) => setSystemSettings(settings),
+        (error) => console.error('No se pudo cargar configuracion del sistema:', error)
+      );
     };
 
     start();
@@ -97,6 +104,7 @@ const Employees = () => {
       if (unsubSales) unsubSales();
       if (unsubShifts) unsubShifts();
       if (unsubWeekly) unsubWeekly();
+      if (unsubSettings) unsubSettings();
     };
   }, []);
 
@@ -134,11 +142,12 @@ const Employees = () => {
           shifts,
           closures: weeklyShiftClosures,
           sales,
-          referenceDate: new Date()
+          referenceDate: new Date(),
+          weeklyShiftSettings: systemSettings.weeklyShift
         })
       ])
     ),
-    [employees, sales, shifts, weeklyShiftClosures]
+    [employees, sales, shifts, systemSettings.weeklyShift, weeklyShiftClosures]
   );
 
   useEffect(() => {
@@ -150,7 +159,8 @@ const Employees = () => {
       closures: weeklyShiftClosures,
       sales,
       closedBy: currentActor,
-      referenceDate: new Date()
+      referenceDate: new Date(),
+      weeklyShiftSettings: systemSettings.weeklyShift
     });
 
     if (automaticClosures.length === 0) return;
@@ -159,7 +169,7 @@ const Employees = () => {
       .catch((error) => {
         console.error('Error auto-closing weekly shifts from employees page:', error);
       });
-  }, [currentActor, employees, isAdmin, sales, shifts, weeklyShiftClosures]);
+  }, [currentActor, employees, isAdmin, sales, shifts, systemSettings.weeklyShift, weeklyShiftClosures]);
 
   const openAddModal = () => {
     setEditingEmployee(null);

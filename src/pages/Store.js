@@ -21,6 +21,7 @@ import { subscribeShifts } from '../services/shiftsService';
 import { verifyFirestoreAvailability } from '../services/firestoreHealthService';
 import { createStoreStatusLog, subscribeStoreStatusLogs } from '../services/storeStatusLogService';
 import { saveWeeklyShiftClosure, subscribeWeeklyShiftClosures } from '../services/weeklyShiftClosureService';
+import { DEFAULT_SYSTEM_SETTINGS, subscribeSystemSettings } from '../services/settingsService';
 import { subscribeSpecialOrderPayments } from '../services/specialOrdersService';
 import { normalizePaymentMethod, PAYMENT_METHODS } from '../utils/paymentUtils';
 import { buildStoreClosurePrintHtml } from '../utils/printTemplates';
@@ -112,6 +113,7 @@ const StorePage = () => {
   const [weeklySearchTerm, setWeeklySearchTerm] = useState('');
   const [notification, setNotification] = useState(null);
   const [firestoreReady, setFirestoreReady] = useState(true);
+  const [systemSettings, setSystemSettings] = useState(DEFAULT_SYSTEM_SETTINGS);
 
   const resolveCurrentEmployee = useCallback((rows) => {
     if (!user) return null;
@@ -170,6 +172,10 @@ const StorePage = () => {
       (rows) => setSpecialOrderPayments(rows),
       (error) => console.error('Error subscribing special order payments in store page:', error)
     );
+    const unsubSettings = subscribeSystemSettings(
+      (settings) => setSystemSettings(settings),
+      (error) => console.error('Error subscribing system settings in store page:', error)
+    );
 
     return () => {
       unsubEmployees();
@@ -178,6 +184,7 @@ const StorePage = () => {
       unsubStoreStatusLogs();
       unsubSpecialPayments();
       unsubWeeklyShiftClosures();
+      unsubSettings();
     };
   }, []);
 
@@ -415,11 +422,12 @@ const StorePage = () => {
           shifts,
           closures: weeklyShiftClosures,
           sales,
-          referenceDate: new Date()
+          referenceDate: new Date(),
+          weeklyShiftSettings: systemSettings.weeklyShift
         })
       }))
       .sort((a, b) => b.stats.totalEarned - a.stats.totalEarned);
-  }, [employees, sales, shifts, weeklyShiftClosures]);
+  }, [employees, sales, shifts, systemSettings.weeklyShift, weeklyShiftClosures]);
 
   const filteredEmployeeWeeklyRows = useMemo(() => {
     const search = weeklySearchTerm.trim().toLowerCase();
@@ -458,7 +466,8 @@ const StorePage = () => {
       closures: weeklyShiftClosures,
       sales,
       closedBy: currentActor,
-      referenceDate: new Date()
+      referenceDate: new Date(),
+      weeklyShiftSettings: systemSettings.weeklyShift
     });
 
     if (automaticClosures.length === 0) return;
@@ -473,7 +482,7 @@ const StorePage = () => {
       .catch((error) => {
         console.error('Error creating automatic weekly closures:', error);
       });
-  }, [currentActor, employees, firestoreReady, profile?.role, sales, shifts, weeklyShiftClosures]);
+  }, [currentActor, employees, firestoreReady, profile?.role, sales, shifts, systemSettings.weeklyShift, weeklyShiftClosures]);
 
   const handleManualWeeklyClose = async (employee, stats) => {
     const firestoreAvailable = await ensureFirestoreReady();

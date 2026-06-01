@@ -7,8 +7,25 @@ const roundMoney = (value) => Math.round((Number(value || 0) + Number.EPSILON) *
 
 const roundHours = (value) => Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
 
-export const getWeeklyShiftCycleWindow = (referenceDate = new Date()) => {
+const DEFAULT_CLOSE_DAY = 6;
+const DEFAULT_CLOSE_TIME = '23:00';
+
+const getCloseMinutes = (closeTime = DEFAULT_CLOSE_TIME) => {
+  const [, hours = '23', minutes = '00'] = String(closeTime || DEFAULT_CLOSE_TIME).match(/^(\d{2}):(\d{2})$/) || [];
+  return Math.min(23, Math.max(0, Number(hours || 23))) * 60
+    + Math.min(59, Math.max(0, Number(minutes || 0)));
+};
+
+const normalizeWeeklyShiftSettings = (settings = {}) => ({
+  closeDay: Number.isInteger(Number(settings.closeDay)) && Number(settings.closeDay) >= 0 && Number(settings.closeDay) <= 6
+    ? Number(settings.closeDay)
+    : DEFAULT_CLOSE_DAY,
+  closeTime: /^\d{2}:\d{2}$/.test(String(settings.closeTime || '')) ? String(settings.closeTime) : DEFAULT_CLOSE_TIME
+});
+
+export const getWeeklyShiftCycleWindow = (referenceDate = new Date(), weeklyShiftSettings = {}) => {
   const now = toDate(referenceDate) || new Date();
+  const settings = normalizeWeeklyShiftSettings(weeklyShiftSettings);
   const cycleStart = new Date(now);
   cycleStart.setHours(0, 0, 0, 0);
   cycleStart.setDate(cycleStart.getDate() - cycleStart.getDay());
@@ -21,6 +38,11 @@ export const getWeeklyShiftCycleWindow = (referenceDate = new Date()) => {
     cycleStart,
     cycleEnd,
     cycleKey: cycleStart.toISOString().slice(0, 10),
+    isCloseDay: now.getDay() === settings.closeDay,
+    isCloseDue: now.getDay() === settings.closeDay
+      && (now.getHours() * 60 + now.getMinutes()) >= getCloseMinutes(settings.closeTime),
+    closeDay: settings.closeDay,
+    closeTime: settings.closeTime,
     isSaturday: now.getDay() === 6
   };
 };
@@ -82,9 +104,10 @@ export const calculateEmployeeWeeklyShiftStats = ({
   shifts = [],
   closures = [],
   sales = [],
-  referenceDate = new Date()
+  referenceDate = new Date(),
+  weeklyShiftSettings = {}
 }) => {
-  const cycle = getWeeklyShiftCycleWindow(referenceDate);
+  const cycle = getWeeklyShiftCycleWindow(referenceDate, weeklyShiftSettings);
   const latestClosure = getLatestClosureForEmployee(employee?.id, closures);
   const latestClosureDate = toDate(latestClosure?.closedAt || latestClosure?.createdAt);
   const baseline = latestClosureDate && latestClosureDate > cycle.cycleStart
@@ -153,10 +176,11 @@ export const getAutomaticWeeklyClosuresToCreate = ({
   closures = [],
   sales = [],
   closedBy,
-  referenceDate = new Date()
+  referenceDate = new Date(),
+  weeklyShiftSettings = {}
 }) => {
-  const cycle = getWeeklyShiftCycleWindow(referenceDate);
-  if (!cycle.isSaturday) return [];
+  const cycle = getWeeklyShiftCycleWindow(referenceDate, weeklyShiftSettings);
+  if (!cycle.isCloseDue) return [];
 
   return employees
     .filter((employee) => employee?.id)

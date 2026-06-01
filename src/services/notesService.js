@@ -16,6 +16,7 @@ export const normalizeNote = (note = {}) => ({
   id: String(note.id || '').trim(),
   title: String(note.title || '').trim(),
   content: String(note.content || note.body || '').trim(),
+  status: note.status === 'done' ? 'done' : 'pending',
   createdAt: normalizeDateValue(note.createdAt),
   updatedAt: normalizeDateValue(note.updatedAt),
   createdBy: String(note.createdBy || '').trim(),

@@ -12,8 +12,8 @@ import {
   BarChart3,
   Printer,
   ClipboardList,
-  ShieldCheck,
   FileText,
+  Settings,
   Menu,
   X,
   LogOut,
@@ -32,8 +32,8 @@ import Employees from './pages/Employees';
 import Reports from './pages/Reports';
 import Printers from './pages/Printers';
 import SpecialOrders from './pages/SpecialOrders';
-import RolesPermissions from './pages/RolesPermissions';
 import FinancePage from './pages/Finance';
+import SettingsPage from './pages/Settings';
 import Login from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
 import { startSessionPresence } from './services/systemPresenceService';
@@ -57,7 +57,7 @@ const SIDEBAR_ITEMS = [
   { id: 'employees', label: 'Empleados', icon: Users },
   { id: 'reports', label: 'Reportes', icon: BarChart3 },
   { id: 'printers', label: 'Impresoras', icon: Printer },
-  { id: 'manage_roles', label: 'Roles y permisos', icon: ShieldCheck, adminOnly: true }
+  { id: 'settings', label: 'Configuracion', icon: Settings, adminOnly: true }
 ];
 
 function App() {
@@ -81,6 +81,8 @@ function App() {
         ? allowedPages.includes('store') || allowedPages.includes('shifts')
         : item.id === 'online_store'
           ? allowedPages.includes('online_store') || allowedPages.includes('store')
+          : item.id === 'settings'
+            ? allowedPages.includes('settings') || allowedPages.includes('manage_roles') || profile?.role === 'admin'
           : allowedPages.includes(item.id);
       return hasAccess && (!item.adminOnly || profile?.role === 'admin');
     }),
@@ -92,11 +94,13 @@ function App() {
       ? allowedPages.includes('store') || allowedPages.includes('shifts')
       : currentPage === 'online_store'
         ? allowedPages.includes('online_store') || allowedPages.includes('store')
+      : currentPage === 'settings'
+        ? allowedPages.includes('settings') || allowedPages.includes('manage_roles') || profile?.role === 'admin'
       : allowedPages.includes(currentPage);
     if (!hasAccessToCurrentPage) {
       setCurrentPage(allowedPages[0] || 'dashboard');
     }
-  }, [allowedPages, currentPage]);
+  }, [allowedPages, currentPage, profile?.role]);
 
   useEffect(() => {
     if (!user || !profile) return () => {};
@@ -202,7 +206,8 @@ function App() {
       case 'printers':
         return <Printers />;
       case 'manage_roles':
-        return <RolesPermissions />;
+      case 'settings':
+        return <SettingsPage />;
       default:
         return <Dashboard />;
     }
