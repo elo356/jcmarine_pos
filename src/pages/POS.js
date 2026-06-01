@@ -27,6 +27,7 @@ import {
 } from '../services/posCartService';
 import { subscribeCategories } from '../services/categoryService';
 import { commitSaleTransaction } from '../services/checkoutService';
+import { verifyFirestoreAvailability } from '../services/firestoreHealthService';
 import { subscribeStoreStatusLogs } from '../services/storeStatusLogService';
 import { upsertWeeklyCachedSale } from '../services/weeklySalesCacheService';
 import { subscribeShifts } from '../services/shiftsService';
@@ -612,6 +613,12 @@ function POS({
   const ensureCheckoutReady = useCallback(async () => {
     if (!isStoreOpen) {
       showNotification('error', 'Primero abre la tienda antes de cobrar.');
+      return false;
+    }
+
+    const firestoreStatus = await verifyFirestoreAvailability({ force: true });
+    if (!firestoreStatus.ok) {
+      showNotification('error', 'Este equipo no esta conectado a Firestore. No cobres hasta que sincronice.');
       return false;
     }
 

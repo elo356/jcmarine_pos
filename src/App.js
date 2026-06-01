@@ -40,6 +40,7 @@ import { startSessionPresence } from './services/systemPresenceService';
 import { useActiveSystemsCount } from './hooks/useActiveSystemsCount';
 import { purgeDemoDataIfNeeded } from './services/dataCleanupService';
 import { useRoleDefinitions } from './hooks/useRoleDefinitions';
+import { verifyFirestoreAvailability } from './services/firestoreHealthService';
 
 const SIDEBAR_ITEMS = [
   { id: 'dashboard', label: 'Panel', icon: LayoutDashboard },
@@ -66,6 +67,7 @@ function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [pendingProductDraft, setPendingProductDraft] = useState(null);
+  const [firestoreStatus, setFirestoreStatus] = useState({ ok: true, checking: true, error: null });
   const activeSystemsCount = useActiveSystemsCount(profile?.role === 'admin');
 
   const allowedPages = useMemo(() => {
@@ -107,6 +109,43 @@ function App() {
       console.error('Error purging demo data:', error);
     });
   }, [profile?.role]);
+
+  const refreshFirestoreStatus = async ({ force = false } = {}) => {
+    setFirestoreStatus((current) => ({ ...current, checking: true }));
+    const status = await verifyFirestoreAvailability({ force });
+    setFirestoreStatus({
+      ok: status.ok,
+      checking: false,
+      error: status.error || null
+    });
+    return status;
+  };
+
+  useEffect(() => {
+    if (!user) return undefined;
+    refreshFirestoreStatus({ force: true });
+    const intervalId = window.setInterval(() => {
+      refreshFirestoreStatus({ force: true });
+    }, 60000);
+
+    const handleOnline = () => refreshFirestoreStatus({ force: true });
+    const handleOffline = () => {
+      setFirestoreStatus({
+        ok: false,
+        checking: false,
+        error: new Error('Sin conexion a internet')
+      });
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [user]);
 
   const renderPage = () => {
     switch (currentPage) {
@@ -170,6 +209,9 @@ function App() {
   };
 
   const currentPageTitle = visibleItems.find((item) => item.id === currentPage)?.label || 'Panel';
+  const firestoreErrorCode = typeof firestoreStatus.error?.code === 'string'
+    ? firestoreStatus.error.code.replace(/^firestore\//, '')
+    : '';
 
   if (loading) {
     return (
@@ -325,6 +367,27 @@ function App() {
           </header>
 
           <div className="p-4 lg:p-8">{renderPage()}</div>
+          {!firestoreStatus.ok && (
+            <div className="fixed bottom-4 left-4 right-4 lg:left-auto lg:right-6 lg:w-[30rem] z-50 rounded-lg border border-red-300 bg-red-50 p-4 shadow-lg">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="font-semibold text-red-900">Este equipo no esta sincronizando con Firestore</p>
+                  <p className="mt-1 text-sm text-red-800">
+                    Los cambios pueden quedarse solo en esta computadora y no aparecer en los otros dispositivos.
+                    {firestoreErrorCode ? ` Codigo: ${firestoreErrorCode}.` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => refreshFirestoreStatus({ force: true })}
+                  className="btn btn-secondary whitespace-nowrap"
+                  disabled={firestoreStatus.checking}
+                >
+                  {firestoreStatus.checking ? 'Revisando...' : 'Reintentar'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </main>
     </div>
