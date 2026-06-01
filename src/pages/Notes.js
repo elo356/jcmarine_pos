@@ -92,9 +92,12 @@ function Notes() {
       ? notes
       : notes.filter((note) => getNoteStatus(note) === statusFilter);
 
-    if (!query) return statusFiltered;
+    const byDateDesc = (a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
+    const sorted = [...statusFiltered].sort(byDateDesc);
 
-    return statusFiltered.filter((note) => (
+    if (!query) return sorted;
+
+    return sorted.filter((note) => (
       note.title.toLowerCase().includes(query) || note.content.toLowerCase().includes(query)
     ));
   }, [notes, searchQuery, statusFilter]);
@@ -215,6 +218,22 @@ function Notes() {
           message={notification.message}
           onClose={() => setNotification(null)}
         />
+      )}
+
+      {syncMeta && (
+        <div className={`fixed top-4 right-6 z-50 rounded-lg border px-3 py-2 text-sm font-medium ${
+          syncMeta.failed
+            ? 'border-amber-200 bg-amber-50 text-amber-800'
+            : syncMeta.fromCache
+              ? 'border-blue-200 bg-blue-50 text-blue-800'
+              : 'border-green-200 bg-green-50 text-green-800'
+        }`}>
+          {syncMeta.failed
+            ? 'Trabajando con caché local'
+            : syncMeta.fromCache
+              ? 'Cargando notas... (sin conexión)'
+              : 'Notas sincronizadas'}
+        </div>
       )}
 
       <div className="page-header">

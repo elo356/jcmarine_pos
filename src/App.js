@@ -232,6 +232,21 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 lg:flex">
+      {firestoreStatus && (
+        <div className={`fixed top-4 right-6 z-50 rounded-lg border px-3 py-2 text-sm font-medium ${
+          firestoreStatus.checking
+            ? 'border-blue-200 bg-blue-50 text-blue-800'
+            : firestoreStatus.ok
+              ? 'border-green-200 bg-green-50 text-green-800'
+              : 'border-amber-200 bg-amber-50 text-amber-800'
+        }`}>
+          {firestoreStatus.checking
+            ? 'Comprobando Firestore...'
+            : firestoreStatus.ok
+              ? 'Firestore: conectado'
+              : `Sincronización OFFLINE${firestoreErrorCode ? ` • ${firestoreErrorCode}` : ''}`}
+        </div>
+      )}
       <div className="lg:hidden fixed top-0 left-0 right-0 bg-white shadow-sm z-50 px-4 py-3 flex items-center justify-between">
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
