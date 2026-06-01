@@ -220,21 +220,7 @@ function Notes() {
         />
       )}
 
-      {syncMeta && (
-        <div className={`fixed top-4 right-6 z-50 rounded-lg border px-3 py-2 text-sm font-medium ${
-          syncMeta.failed
-            ? 'border-amber-200 bg-amber-50 text-amber-800'
-            : syncMeta.fromCache
-              ? 'border-blue-200 bg-blue-50 text-blue-800'
-              : 'border-green-200 bg-green-50 text-green-800'
-        }`}>
-          {syncMeta.failed
-            ? 'Trabajando con caché local'
-            : syncMeta.fromCache
-              ? 'Cargando notas... (sin conexión)'
-              : 'Notas sincronizadas'}
-        </div>
-      )}
+      
 
       <div className="page-header">
         <div>

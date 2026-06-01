@@ -241,10 +241,10 @@ function App() {
               : 'border-amber-200 bg-amber-50 text-amber-800'
         }`}>
           {firestoreStatus.checking
-            ? 'Comprobando Firestore...'
+            ? 'Comprobando base de datos...'
             : firestoreStatus.ok
-              ? 'Firestore: conectado'
-              : `Sincronización OFFLINE${firestoreErrorCode ? ` • ${firestoreErrorCode}` : ''}`}
+              ? 'Base de datos: conectado'
+              : `Base de datos: desconectada${firestoreErrorCode ? ` • ${firestoreErrorCode}` : ''}`}
         </div>
       )}
       <div className="lg:hidden fixed top-0 left-0 right-0 bg-white shadow-sm z-50 px-4 py-3 flex items-center justify-between">
