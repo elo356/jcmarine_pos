@@ -15,12 +15,35 @@ import { getPrimaryProductBarcode, normalizeProductTaxConfig } from '../data/dem
 
 const productsCol = collection(db, 'products');
 const logsCol = collection(db, 'inventoryLogs');
+const FIRESTORE_BATCH_LIMIT = 450;
 
-const normalizeProduct = (product) => ({
-  ...normalizeProductTaxConfig(product),
-  sku: product.sku || getPrimaryProductBarcode(product) || product.id,
-  linkedProductIds: Array.isArray(product.linkedProductIds) ? product.linkedProductIds : []
-});
+const normalizeProduct = (product) => {
+  const normalized = normalizeProductTaxConfig(product);
+  return {
+    ...normalized,
+    sku: normalized.sku || getPrimaryProductBarcode(normalized) || normalized.id,
+    linkedProductIds: Array.isArray(normalized.linkedProductIds) ? normalized.linkedProductIds : []
+  };
+};
+
+const buildProductPayload = (product) => {
+  const normalized = normalizeProduct(product);
+  const payload = {
+    ...normalized,
+    sku: normalized.sku || getPrimaryProductBarcode(normalized) || normalized.id,
+    barcode: getPrimaryProductBarcode(normalized),
+    ivuStateEnabled: normalized.ivuStateEnabled !== false,
+    ivuMunicipalEnabled: normalized.ivuMunicipalEnabled !== false,
+    linkedProductIds: Array.isArray(normalized.linkedProductIds) ? normalized.linkedProductIds : [],
+    updatedAt: new Date().toISOString()
+  };
+
+  delete payload.image;
+  delete payload.photo;
+  delete payload.productImage;
+
+  return payload;
+};
 
 export const listProducts = async () => {
   const snapshot = await getDocs(productsCol);
@@ -38,30 +61,43 @@ export const subscribeProducts = (onData, onError) => {
   );
 };
 
-export const saveProductsSnapshot = async (products, deletedIds = []) => {
-  const batch = writeBatch(db);
+export const saveProductsSnapshot = async (products, deletedIds = [], options = {}) => {
+  const safeProducts = Array.isArray(products) ? products.filter((product) => product?.id) : [];
+  const safeDeletedIds = Array.isArray(deletedIds) ? deletedIds.filter(Boolean) : [];
 
-  products.forEach((product) => {
-    batch.set(
-      doc(db, 'products', product.id),
-      {
-        ...product,
-        sku: product.sku || getPrimaryProductBarcode(product) || product.id,
-        barcode: getPrimaryProductBarcode(product),
-        ivuStateEnabled: product.ivuStateEnabled !== false,
-        ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false,
-        linkedProductIds: Array.isArray(product.linkedProductIds) ? product.linkedProductIds : [],
-        updatedAt: new Date().toISOString()
-      },
-      { merge: true }
-    );
-  });
+  if (safeProducts.length === 0 && safeDeletedIds.length === 0) {
+    return;
+  }
 
-  deletedIds.forEach((id) => {
-    batch.delete(doc(db, 'products', id));
-  });
+  if (safeProducts.length === 0 && safeDeletedIds.length > 0 && options.allowEmptyProducts !== true) {
+    throw new Error('Proteccion de inventario: no se permite guardar un inventario vacio sin confirmacion explicita.');
+  }
 
-  await batch.commit();
+  const operations = [
+    ...safeProducts.map((product) => ({
+      type: 'set',
+      id: product.id,
+      payload: buildProductPayload(product)
+    })),
+    ...safeDeletedIds.map((id) => ({
+      type: 'delete',
+      id
+    }))
+  ];
+
+  for (let index = 0; index < operations.length; index += FIRESTORE_BATCH_LIMIT) {
+    const batch = writeBatch(db);
+    operations.slice(index, index + FIRESTORE_BATCH_LIMIT).forEach((operation) => {
+      const productRef = doc(db, 'products', operation.id);
+      if (operation.type === 'delete') {
+        batch.delete(productRef);
+        return;
+      }
+
+      batch.set(productRef, operation.payload, { merge: true });
+    });
+    await batch.commit();
+  }
 };
 
 export const updateProductStock = async (productId, newStock) => {

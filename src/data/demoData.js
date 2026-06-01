@@ -88,9 +88,13 @@ export const normalizeProductTaxConfig = (product = {}) => {
   const alternateSkus = normalizeProductSkus(
     product.alternateSkus || product.skuReferences || product.crossReferences || []
   ).filter((item) => item !== sku);
+  const safeProduct = { ...product };
+  delete safeProduct.image;
+  delete safeProduct.photo;
+  delete safeProduct.productImage;
 
   return {
-    ...product,
+    ...safeProduct,
     sku,
     alternateSkus,
     barcode: barcodes[0] || '',
@@ -658,7 +662,13 @@ export const loadData = () => {
 
 // Función para guardar datos en localStorage
 export const saveData = (data) => {
-  localStorage.setItem('posData', JSON.stringify(data));
+  const safeData = {
+    ...data,
+    products: Array.isArray(data.products)
+      ? data.products.map(normalizeProductTaxConfig)
+      : data.products
+  };
+  localStorage.setItem('posData', JSON.stringify(safeData));
 };
 
 // Función para resetear datos

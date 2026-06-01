@@ -30,7 +30,6 @@ import useIsMobileDevice from '../hooks/useIsMobileDevice';
 import useScannerHidStatus from '../hooks/useScannerHidStatus';
 import useScannerKeyboardInput from '../hooks/useScannerKeyboardInput';
 import { getCameraAccessErrorMessage, startCameraBarcodeScanner } from '../utils/cameraBarcodeScanner';
-import { fileToTxt } from '../utils/fileToTxt';
 
 function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   const { user, profile } = useAuth();
@@ -108,8 +107,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     sizeStocks: [],
     ivuStateEnabled: true,
     ivuMunicipalEnabled: true,
-    linkedProductIds: [],
-    image: null
+    linkedProductIds: []
   });
   const categoryColorPalette = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316'];
   const buildEditableBarcodes = useCallback(
@@ -580,8 +578,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sizeStocks: buildEditableSizeStocks(product.sizeStocks, product.availableSizes, product.stock),
         ivuStateEnabled: product.ivuStateEnabled !== false,
         ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false,
-        linkedProductIds: product.linkedProductIds || [],
-        image: product.image || null
+        linkedProductIds: product.linkedProductIds || []
       });
       setActiveBarcodeFieldIndex(0);
     } else {
@@ -605,8 +602,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sizeStocks: [{ size: '', stock: '' }],
         ivuStateEnabled: true,
         ivuMunicipalEnabled: true,
-        linkedProductIds: [],
-        image: null
+        linkedProductIds: []
       });
       setActiveBarcodeFieldIndex(0);
     }
@@ -635,8 +631,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       sizeStocks: [{ size: '', stock: '' }],
       ivuStateEnabled: true,
       ivuMunicipalEnabled: true,
-      linkedProductIds: [],
-      image: null
+      linkedProductIds: []
     });
     setActiveBarcodeFieldIndex(0);
   };
@@ -711,20 +706,30 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     });
   };
 
-  const syncProductsInBackground = (nextProducts, successMessage, errorMessage, deletedIds = []) => {
-    setProducts(nextProducts);
+  const syncProductsInBackground = (nextProducts, successMessage, errorMessage, deletedIds = [], options = {}) => {
     const localData = loadData();
-    saveData({
-      ...localData,
-      products: nextProducts
-    });
-    closeProductModal(true);
-    showNotification('success', successMessage);
-
-    saveProductsSnapshot(nextProducts, deletedIds).catch((error) => {
+    try {
+      saveData({
+        ...localData,
+        products: nextProducts
+      });
+    } catch (error) {
       console.error(error);
-      showNotification('warning', errorMessage);
-    });
+      showNotification('error', 'No se pudo guardar el inventario localmente. Revisa el almacenamiento del navegador.');
+      return;
+    }
+
+    setProducts(nextProducts);
+    closeProductModal(true);
+
+    saveProductsSnapshot(nextProducts, deletedIds, options)
+      .then(() => {
+        showNotification('success', successMessage);
+      })
+      .catch((error) => {
+        console.error(error);
+        showNotification('error', errorMessage);
+      });
   };
 
   const handleSubmit = async (e) => {
@@ -814,8 +819,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
             sizeStocks,
             ivuStateEnabled: formData.ivuStateEnabled,
             ivuMunicipalEnabled: formData.ivuMunicipalEnabled,
-            linkedProductIds,
-            image: formData.image || null
+            linkedProductIds
           };
         }
         return p;
@@ -872,7 +876,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sizeStocks,
         ivuStateEnabled: formData.ivuStateEnabled,
         ivuMunicipalEnabled: formData.ivuMunicipalEnabled,
-        image: formData.image || null,
         linkedProductIds
       };
 
@@ -910,7 +913,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
     saveProductsSnapshot(updatedProducts, [productId]).catch((error) => {
       console.error(error);
-      showNotification('warning', 'Producto eliminado, pero no se pudo sincronizar con Firestore');
+      showNotification('error', 'Producto eliminado localmente, pero no se pudo sincronizar con Firestore');
     });
   };
 
@@ -929,7 +932,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
     saveProductsSnapshot(updatedProducts).catch((error) => {
       console.error(error);
-      showNotification('warning', 'Estado actualizado, pero no se pudo sincronizar con Firestore');
+      showNotification('error', 'Estado actualizado localmente, pero no se pudo sincronizar con Firestore');
     });
   };
 
@@ -1089,9 +1092,9 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     setDeleteAllPassword('');
     setDeletingAll(false);
 
-    saveProductsSnapshot([], deletedIds).catch((error) => {
+    saveProductsSnapshot([], deletedIds, { allowEmptyProducts: true }).catch((error) => {
       console.error(error);
-      showNotification('warning', 'Los productos se borraron localmente, pero no se pudo sincronizar con Firestore');
+      showNotification('error', 'Los productos se borraron localmente, pero no se pudo sincronizar con Firestore');
     });
   };
 
@@ -1241,7 +1244,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
           sizeStocks: matched?.sizeStocks || [],
           ivuStateEnabled: matched?.ivuStateEnabled !== false,
           ivuMunicipalEnabled: matched?.ivuMunicipalEnabled !== false,
-          image: matched?.image || null,
           linkedProductIds: matched?.linkedProductIds || []
         };
 
@@ -1259,6 +1261,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       });
 
       await saveProductsSnapshot(currentProducts);
+      const localData = loadData();
+      saveData({ ...localData, products: currentProducts });
       setProducts(currentProducts);
       showNotification(
         'success',
@@ -1783,29 +1787,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                 className="input w-full h-20"
                 placeholder="Descripción del producto..."
               />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Foto (opcional)</label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={async (e) => {
-                    const file = e?.target?.files?.[0];
-                    if (!file) return;
-                    try {
-                      const txt = await fileToTxt(file);
-                      setFormData((current) => ({ ...current, image: txt }));
-                    } catch (err) {
-                      console.error('Error leyendo imagen del producto:', err);
-                    }
-                  }}
-                />
-                {formData.image && (
-                  <img src={formData.image} alt="preview" className="h-20 w-20 object-cover rounded border" />
-                )}
-              </div>
             </div>
 
             <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4 rounded-lg border border-gray-200 p-4">
