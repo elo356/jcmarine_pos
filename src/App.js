@@ -217,6 +217,11 @@ function App() {
   const firestoreErrorCode = typeof firestoreStatus.error?.code === 'string'
     ? firestoreStatus.error.code.replace(/^firestore\//, '')
     : '';
+  const firestoreStatusLabel = firestoreStatus.checking
+    ? 'Comprobando base de datos...'
+    : firestoreStatus.ok
+      ? 'Base de datos: conectado'
+      : `Base de datos: desconectada${firestoreErrorCode ? ` • ${firestoreErrorCode}` : ''}`;
 
   if (loading) {
     return (
@@ -232,21 +237,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 lg:flex">
-      {firestoreStatus && (
-        <div className={`fixed top-4 right-6 z-50 rounded-lg border px-3 py-2 text-sm font-medium ${
-          firestoreStatus.checking
-            ? 'border-blue-200 bg-blue-50 text-blue-800'
-            : firestoreStatus.ok
-              ? 'border-green-200 bg-green-50 text-green-800'
-              : 'border-amber-200 bg-amber-50 text-amber-800'
-        }`}>
-          {firestoreStatus.checking
-            ? 'Comprobando base de datos...'
-            : firestoreStatus.ok
-              ? 'Base de datos: conectado'
-              : `Base de datos: desconectada${firestoreErrorCode ? ` • ${firestoreErrorCode}` : ''}`}
-        </div>
-      )}
       <div className="lg:hidden fixed top-0 left-0 right-0 bg-white shadow-sm z-50 px-4 py-3 flex items-center justify-between">
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -371,17 +361,21 @@ function App() {
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3">
                 {profile?.role === 'admin' && (
                   <div className="px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm font-medium">
                     Sistemas abiertos: {activeSystemsCount}
                   </div>
                 )}
-                <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg relative">
-                  <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
-                    <span className="font-bold text-gray-600">3</span>
-                  </div>
-                </button>
+                <div className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
+                  firestoreStatus.checking
+                    ? 'border-blue-200 bg-blue-50 text-blue-800'
+                    : firestoreStatus.ok
+                      ? 'border-green-200 bg-green-50 text-green-800'
+                      : 'border-amber-200 bg-amber-50 text-amber-800'
+                }`}>
+                  {firestoreStatusLabel}
+                </div>
               </div>
             </div>
           </header>
@@ -391,7 +385,7 @@ function App() {
             <div className="fixed bottom-4 left-4 right-4 lg:left-auto lg:right-6 lg:w-[30rem] z-50 rounded-lg border border-red-300 bg-red-50 p-4 shadow-lg">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <p className="font-semibold text-red-900">Este equipo no esta sincronizando con Firestore</p>
+                  <p className="font-semibold text-red-900">Este equipo no esta sincronizando con la base de datos</p>
                   <p className="mt-1 text-sm text-red-800">
                     Los cambios pueden quedarse solo en esta computadora y no aparecer en los otros dispositivos.
                     {firestoreErrorCode ? ` Codigo: ${firestoreErrorCode}.` : ''}
