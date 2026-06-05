@@ -44,6 +44,9 @@ function useScannerHidStatus(preferredMatchers = DEFAULT_MATCHERS) {
 
     try {
       const devices = await navigator.hid.requestDevice({ filters: [] });
+      // The HID picker is a native dialog that can leave keyboard focus outside
+      // the renderer on Windows — restore it so input fields work immediately.
+      setTimeout(() => window.focus(), 0);
       const matchedDevice = devices.find((device) => matchesScannerName(device, preferredMatchers)) || devices[0];
       setScannerDetected(Boolean(matchedDevice));
       setDeviceName(matchedDevice?.productName || '');

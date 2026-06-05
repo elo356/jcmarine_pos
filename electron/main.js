@@ -193,6 +193,12 @@ async function createWindow() {
     return { action: 'deny' };
   });
 
+  // Restore keyboard focus to the renderer after the window regains OS focus
+  // (e.g. after Alt-Tab, or after a native file-dialog closes on Windows).
+  mainWindow.on('focus', () => {
+    if (!mainWindow.isDestroyed()) mainWindow.webContents.focus();
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -210,12 +216,15 @@ ipcMain.handle('backup:save', (_event, json, filename, folderPath) => {
 });
 
 ipcMain.handle('backup:choose-folder', async () => {
-  const win = BrowserWindow.getFocusedWindow();
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
   const result = await dialog.showOpenDialog(win, {
     properties: ['openDirectory', 'createDirectory'],
     title: 'Carpeta de copias de seguridad',
     buttonLabel: 'Seleccionar',
   });
+  // showOpenDialog on Windows can leave keyboard focus in the OS frame;
+  // explicitly return it to the renderer so the user can type immediately.
+  if (win && !win.isDestroyed()) win.webContents.focus();
   return result.canceled ? null : result.filePaths[0];
 });
 
