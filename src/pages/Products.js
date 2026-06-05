@@ -1,6 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
 import { Plus, Edit2, Trash2, Search, Package, AlertTriangle, Barcode } from 'lucide-react';
-import { EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
 import {
   loadData,
   formatCurrency,
@@ -35,7 +34,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   const { user, profile } = useAuth();
   const { hasPermission } = useRoleDefinitions();
   const canManageCategories = hasPermission(profile?.role, 'manage_categories') || profile?.role === 'admin';
-  const canDeleteAllProducts = profile?.role === 'admin';
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -54,9 +52,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   const [expandedLinkedProductId, setExpandedLinkedProductId] = useState('');
   const [showBarcodeScannerModal, setShowBarcodeScannerModal] = useState(false);
   const [activeBarcodeFieldIndex, setActiveBarcodeFieldIndex] = useState(0);
-  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
-  const [deleteAllPassword, setDeleteAllPassword] = useState('');
-  const [deletingAll, setDeletingAll] = useState(false);
   const [scannerStatus, setScannerStatus] = useState('Listo para escanear');
   const [scannerError, setScannerError] = useState('');
   const [manualBarcode, setManualBarcode] = useState('');
@@ -1046,57 +1041,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     }
   };
 
-  const handleDeleteAllProducts = async () => {
-    if (!canDeleteAllProducts) {
-      showNotification('error', 'Solo los administradores pueden borrar todo el inventario.');
-      return;
-    }
-
-    if (products.length === 0) {
-      showNotification('error', 'No hay productos para borrar');
-      return;
-    }
-
-    if (!user?.email) {
-      showNotification('error', 'No se pudo validar la cuenta del administrador actual.');
-      return;
-    }
-
-    if (!deleteAllPassword) {
-      showNotification('error', 'Debes escribir tu contraseña para confirmar.');
-      return;
-    }
-
-    setDeletingAll(true);
-
-    try {
-      const credential = EmailAuthProvider.credential(user.email, deleteAllPassword);
-      await reauthenticateWithCredential(auth.currentUser || user, credential);
-    } catch (error) {
-      console.error('Error reauthenticating admin before deleting all products:', error);
-      setDeletingAll(false);
-      showNotification('error', 'La contraseña es incorrecta. No se borró el inventario.');
-      return;
-    }
-
-    const deletedIds = products.map((p) => p.id);
-    setProducts([]);
-    setExpandedLinkedProductId('');
-    const localData = loadData();
-    saveData({
-      ...localData,
-      products: []
-    });
-    showNotification('success', 'Se borraron todos los productos');
-    setShowDeleteAllModal(false);
-    setDeleteAllPassword('');
-    setDeletingAll(false);
-
-    saveProductsSnapshot([], deletedIds, { allowEmptyProducts: true }).catch((error) => {
-      console.error(error);
-      showNotification('error', 'Los productos se borraron localmente, pero no se pudo sincronizar con Firestore');
-    });
-  };
 
   const parseNumber = (value, fallback = 0) => {
     if (value === null || value === undefined || value === '') return fallback;
@@ -1347,22 +1291,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                 <Plus size={20} />
                 <span className="hidden md:inline">Nuevo Producto</span>
               </button>
-              {canDeleteAllProducts && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (products.length === 0) {
-                      showNotification('error', 'No hay productos para borrar');
-                      return;
-                    }
-                    setDeleteAllPassword('');
-                    setShowDeleteAllModal(true);
-                  }}
-                  className="btn btn-secondary whitespace-nowrap"
-                >
-                  Borrar todo
-                </button>
-              )}
             </div>
           </div>
         </div>
@@ -1571,53 +1499,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       )}
       </div>
 
-      <Modal
-        isOpen={showDeleteAllModal}
-        onClose={() => {
-          if (deletingAll) return;
-          setShowDeleteAllModal(false);
-          setDeleteAllPassword('');
-        }}
-        title="Confirmar borrado total"
-        size="md"
-      >
-        <div className="space-y-4">
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-            Esto borrará todos los productos del sistema. Solo un administrador puede confirmar esta acción.
-          </div>
-
-          <Input
-            label="Contraseña del administrador"
-            type="password"
-            value={deleteAllPassword}
-            onChange={(e) => setDeleteAllPassword(e.target.value)}
-            placeholder="Escribe tu contraseña para continuar"
-            required
-          />
-
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                setShowDeleteAllModal(false);
-                setDeleteAllPassword('');
-              }}
-              disabled={deletingAll}
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleDeleteAllProducts}
-              disabled={deletingAll}
-            >
-              {deletingAll ? 'Verificando...' : 'Confirmar borrado'}
-            </button>
-          </div>
-        </div>
-      </Modal>
 
       {/* Add/Edit Modal */}
       <Modal

@@ -9,8 +9,14 @@ export const DEFAULT_WEEKLY_SHIFT_SETTINGS = {
   closeTime: '23:00'
 };
 
+export const DEFAULT_BACKUP_SETTINGS = {
+  enabled: false,
+  intervalDays: 7,
+};
+
 export const DEFAULT_SYSTEM_SETTINGS = {
-  weeklyShift: DEFAULT_WEEKLY_SHIFT_SETTINGS
+  weeklyShift: DEFAULT_WEEKLY_SHIFT_SETTINGS,
+  backup: DEFAULT_BACKUP_SETTINGS,
 };
 
 export const normalizeWeeklyShiftSettings = (settings = {}) => {
@@ -27,10 +33,18 @@ export const normalizeWeeklyShiftSettings = (settings = {}) => {
   };
 };
 
+const normalizeBackupSettings = (s = {}) => ({
+  enabled: typeof s.enabled === 'boolean' ? s.enabled : DEFAULT_BACKUP_SETTINGS.enabled,
+  intervalDays: [1, 7, 14, 30].includes(Number(s.intervalDays))
+    ? Number(s.intervalDays)
+    : DEFAULT_BACKUP_SETTINGS.intervalDays,
+});
+
 export const normalizeSystemSettings = (settings = {}) => ({
   ...DEFAULT_SYSTEM_SETTINGS,
   ...settings,
-  weeklyShift: normalizeWeeklyShiftSettings(settings.weeklyShift)
+  weeklyShift: normalizeWeeklyShiftSettings(settings.weeklyShift),
+  backup: normalizeBackupSettings(settings.backup),
 });
 
 const loadCache = () => {

@@ -5,6 +5,11 @@ node_modules/
 build/
 dist/
 
+# electron-builder
+.icon-ico/
+builder-debug.yml
+builder-effective-config.yaml
+
 # local environment files
 .env
 .env.*

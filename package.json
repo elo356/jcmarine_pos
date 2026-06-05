@@ -1,25 +1,19 @@
 {
   "name": "pos-app",
   "version": "1.0.0",
+  "description": "CJ Marine POS System",
+  "author": "CJ Marine",
   "private": true,
-  "dependencies": {
-    "@zxing/browser": "^0.2.0",
-    "@zxing/library": "^0.22.0",
-    "clsx": "^2.0.0",
-    "date-fns": "^3.0.0",
-    "firebase": "^12.10.0",
-    "lucide-react": "^0.294.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-scripts": "5.0.1",
-    "tailwind-merge": "^2.1.0"
-  },
+  "main": "electron/main.js",
   "scripts": {
     "start": "react-scripts start",
     "build": "npm run build:web",
     "build:web": "cross-env GENERATE_SOURCEMAP=false react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "electron:dev": "concurrently \"cross-env BROWSER=none npm start\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron:build": "node scripts/build-desktop.js",
+    "electron:build:installer": "npm run build:web && electron-builder --win --x64"
   },
   "eslintConfig": {
     "extends": [
@@ -40,9 +34,56 @@
     ]
   },
   "devDependencies": {
+    "@zxing/browser": "^0.2.0",
+    "@zxing/library": "^0.22.0",
     "autoprefixer": "^10.4.16",
+    "clsx": "^2.0.0",
+    "concurrently": "^10.0.3",
     "cross-env": "^7.0.3",
+    "date-fns": "^3.0.0",
+    "electron": "^42.3.3",
+    "electron-builder": "^26.8.1",
+    "firebase": "^12.10.0",
+    "lucide-react": "^0.294.0",
+    "png-to-ico": "^3.0.1",
     "postcss": "^8.4.32",
-    "tailwindcss": "^3.4.0"
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "tailwind-merge": "^2.1.0",
+    "tailwindcss": "^3.4.0",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.cjmarine.pos",
+    "productName": "CJ Marine POS",
+    "extends": null,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "build/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/logo3-removebg-preview.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CJ Marine POS"
+    }
   }
 }

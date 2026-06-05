@@ -13,7 +13,8 @@ const firebaseConfig = {
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const isLocalDevelopment = typeof window !== 'undefined'
+const isElectron = typeof window !== 'undefined' && /electron/i.test(navigator.userAgent);
+const isLocalDevelopment = !isElectron && typeof window !== 'undefined'
   && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
 const db = initializeFirestore(app, {

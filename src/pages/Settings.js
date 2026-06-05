@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Clock, Save, ShieldCheck } from 'lucide-react';
+import { Archive, Clock, Save, ShieldCheck } from 'lucide-react';
 import Notification from '../components/Notification';
 import RolesPermissions from './RolesPermissions';
+import BackupSettings from '../components/BackupSettings';
 import {
   DEFAULT_SYSTEM_SETTINGS,
   saveSystemSettings,
   subscribeSystemSettings
 } from '../services/settingsService';
+import { getBackupState, isBackupDue, runBackup } from '../services/backupService';
 
 const DAY_OPTIONS = [
   { value: 0, label: 'Domingo' },
@@ -32,6 +34,16 @@ function SettingsPage() {
         setSettings(nextSettings);
         setForm(nextSettings.weeklyShift);
         setSyncMeta(meta);
+
+        // Auto-run backup if enabled and due (runs once after settings load from server)
+        if (!meta.fromCache && nextSettings.backup?.enabled) {
+          const { lastBackupAt, folder } = getBackupState();
+          if (isBackupDue(nextSettings.backup.intervalDays, lastBackupAt)) {
+            runBackup(folder).catch((err) =>
+              console.error('[backup] Auto-backup failed:', err)
+            );
+          }
+        }
       },
       (error) => console.error('Error loading system settings:', error)
     );
@@ -60,12 +72,24 @@ function SettingsPage() {
     try {
       await saveSystemSettings({
         ...settings,
-        weeklyShift: {
-          closeDay: Number(form.closeDay),
-          closeTime: form.closeTime
-        }
+        weeklyShift: { closeDay: Number(form.closeDay), closeTime: form.closeTime },
       });
       showNotification('success', 'Configuracion semanal guardada.');
+    } catch (error) {
+      console.error(error);
+      showNotification('warning', 'Se guardo localmente, pero no se pudo sincronizar con Firestore.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveBackup = async (backupConfig) => {
+    setSaving(true);
+    try {
+      const updated = { ...settings, backup: backupConfig };
+      await saveSystemSettings(updated);
+      setSettings(updated);
+      showNotification('success', 'Configuracion de copias de seguridad guardada.');
     } catch (error) {
       console.error(error);
       showNotification('warning', 'Se guardo localmente, pero no se pudo sincronizar con Firestore.');
@@ -112,6 +136,14 @@ function SettingsPage() {
         </button>
         <button
           type="button"
+          onClick={() => setActiveSection('backup')}
+          className={`btn ${activeSection === 'backup' ? 'btn-primary' : 'btn-secondary'}`}
+        >
+          <Archive size={18} />
+          Copia de seguridad
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveSection('roles')}
           className={`btn ${activeSection === 'roles' ? 'btn-primary' : 'btn-secondary'}`}
         >
@@ -120,7 +152,14 @@ function SettingsPage() {
         </button>
       </div>
 
-      {activeSection === 'weekly' ? (
+      {activeSection === 'backup' ? (
+        <div className="card p-6 space-y-6">
+          <BackupSettings
+            backup={settings.backup}
+            onChange={handleSaveBackup}
+          />
+        </div>
+      ) : activeSection === 'weekly' ? (
         <div className="card p-6 space-y-6">
           <div>
             <h2 className="text-xl font-semibold text-gray-900">Cierre automatico de shifts semanales</h2>
@@ -173,6 +212,7 @@ function SettingsPage() {
       ) : (
         <RolesPermissions />
       )}
+
     </div>
   );
 }
