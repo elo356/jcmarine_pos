@@ -8,9 +8,9 @@ import {
   saveSystemSettings,
   subscribeSystemSettings
 } from '../services/settingsService';
+import { getBackupState, isBackupDue, runBackup } from '../services/backupService';
 
 const DAY_LABELS = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
-import { getBackupState, isBackupDue, runBackup } from '../services/backupService';
 
 const DAY_OPTIONS = [
   { value: 0, label: 'Domingo' },

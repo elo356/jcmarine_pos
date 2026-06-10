@@ -1577,37 +1577,57 @@ function Sales() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Pieza nueva que se lleva</label>
-              <input
-                type="text"
-                value={exchangeReplacementSearch}
-                onChange={(e) => setExchangeReplacementSearch(e.target.value)}
-                className="input w-full mb-2"
-                placeholder="Busca por nombre, SKU, barcode o categoria"
-              />
-              <select
-                value={exchangeForm.replacementProductId}
-                onChange={(e) => setExchangeForm((current) => ({
-                  ...current,
-                  replacementProductId: e.target.value,
-                  replacementSize: ''
-                }))}
-                className="input w-full"
-              >
-                <option value="">Selecciona una pieza nueva</option>
-                {filteredReplacementProducts.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.name} - {formatCurrency(product.price || 0)}
-                  </option>
-                ))}
-                {filteredReplacementProducts.length === 0 && (
-                  <option value="" disabled>
-                    No se encontraron piezas
-                  </option>
-                )}
-              </select>
-              <div className="mt-1 text-xs text-gray-500">
-                {filteredReplacementProducts.length} resultado{filteredReplacementProducts.length === 1 ? '' : 's'}
-              </div>
+              {replacementProduct ? (
+                <div className="flex items-center justify-between rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">{replacementProduct.name}</p>
+                    <p className="text-xs text-gray-500">{formatCurrency(replacementProduct.price || 0)}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExchangeForm((current) => ({ ...current, replacementProductId: '', replacementSize: '' }));
+                      setExchangeReplacementSearch('');
+                    }}
+                    className="ml-3 text-gray-400 hover:text-red-500 text-xl leading-none"
+                  >
+                    ×
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={exchangeReplacementSearch}
+                    onChange={(e) => setExchangeReplacementSearch(e.target.value)}
+                    className="input w-full"
+                    placeholder="Busca por nombre, SKU, barcode o categoria"
+                    autoComplete="off"
+                  />
+                  {exchangeReplacementSearch.trim() && (
+                    <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+                      {filteredReplacementProducts.length === 0 ? (
+                        <p className="px-3 py-2 text-sm text-gray-400">No se encontraron piezas</p>
+                      ) : (
+                        filteredReplacementProducts.map((product) => (
+                          <button
+                            key={product.id}
+                            type="button"
+                            onClick={() => {
+                              setExchangeForm((current) => ({ ...current, replacementProductId: product.id, replacementSize: '' }));
+                              setExchangeReplacementSearch('');
+                            }}
+                            className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-100 last:border-b-0 text-left"
+                          >
+                            <span className="font-medium text-gray-800">{product.name}</span>
+                            <span className="text-gray-500 ml-2 shrink-0">{formatCurrency(product.price || 0)}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
 
             {replacementProduct?.useSizeSelection && (
@@ -1668,6 +1688,7 @@ function Sales() {
                   >
                     <option value="cash">Efectivo</option>
                     <option value="card">Tarjeta</option>
+                    <option value="ach">ACH</option>
                     <option value="ath_movil">ATH Movil</option>
                   </select>
                 </div>

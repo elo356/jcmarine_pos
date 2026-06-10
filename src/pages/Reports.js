@@ -843,15 +843,6 @@ const Reports = () => {
                 : 0}% del total
             </div>
           </div>
-          <div className="p-4 bg-amber-50 rounded-lg text-center md:col-span-4">
-            <div className="text-2xl font-bold text-amber-600">{formatCurrency(paymentMethods.split)}</div>
-            <div className="text-sm text-gray-600 mt-1">Ventas split</div>
-            <div className="text-xs text-gray-500">
-              {metrics.totalRevenue > 0
-                ? Math.round((paymentMethods.split / metrics.totalRevenue) * 100)
-                : 0}% del total
-            </div>
-          </div>
         </div>
       </div>
 

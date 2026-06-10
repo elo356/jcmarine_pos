@@ -140,7 +140,7 @@ export const initialData = {
     name: 'CJ Marine',
     address: 'Carr 111 km 05',
     cityStateZip: 'Aguadilla 00603',
-    phone: '939 200 8820',
+    phone: '939 200 3820',
     taxRate: 0.16,
     currency: 'USD',
     printers: [

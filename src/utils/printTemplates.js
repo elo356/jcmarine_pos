@@ -82,9 +82,8 @@ const buildStoreHeader = ({ employeeLabel, employeeValue, printerName = '' }) =>
     <h1 style="font-size:22px;">CJ Marine</h1>
     <p class="muted" style="margin-top:6px;">Carr 111 km 05</p>
     <p class="muted">Aguadilla 00603</p>
-    <p class="muted">939 200 8820</p>
+    <p class="muted">939 200 3820</p>
     ${employeeValue ? `<p class="muted" style="margin-top:8px;">${employeeLabel}: ${employeeValue}</p>` : ''}
-    ${printerName ? `<p class="muted">Destino: ${printerName}</p>` : ''}
   </div>
 `;
 
