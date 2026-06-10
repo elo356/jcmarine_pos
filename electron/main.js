@@ -148,13 +148,31 @@ function startServer() {
 
 // ── Main window ───────────────────────────────────────────────────────────────
 async function createWindow() {
-  Menu.setApplicationMenu(null);
+  // Keep a minimal Edit menu so Ctrl+C/V/X/Z work on Windows.
+  // autoHideMenuBar keeps it invisible unless the user presses Alt.
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: 'Edit',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' },
+        ],
+      },
+    ])
+  );
 
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 900,
     minHeight: 600,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
