@@ -298,6 +298,7 @@ export const normalizeSpecialOrder = (order = {}) => {
     updatedById: order.updatedById || order.updated_by_id || '',
     createdAt: order.createdAt || order.created_at || new Date().toISOString(),
     updatedAt: order.updatedAt || order.updated_at || new Date().toISOString(),
+    stockDeducted: order.stockDeducted === true || order.stock_deducted === true,
     payments
   };
 };

@@ -14,6 +14,7 @@ import { saveCustomer, subscribeCustomers } from '../services/customersService';
 import { subscribeProducts } from '../services/inventoryService';
 import { getSpinConfigurationState, processSpinCardPayment } from '../services/spinService';
 import {
+  adjustInventoryForSpecialOrderItems,
   applySpecialOrderPayment,
   saveSpecialOrder,
   saveSpecialOrderWithPayments,
@@ -221,28 +222,51 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     setNotification({ id: Date.now(), type, message });
   };
 
-  const markOrderAsDelivered = (order) => {
+  const markOrderAsDelivered = async (order) => {
     if (!canDeliverSpecialOrder(order)) {
       showNotification('error', 'No se puede entregar el pedido mientras tenga balance pendiente.');
       return;
     }
+
+    if (!order.stockDeducted) {
+      try {
+        await adjustInventoryForSpecialOrderItems(order.items, -1);
+      } catch (error) {
+        console.error('Error descontando inventario del pedido especial:', error);
+        showNotification('error', 'No se pudo actualizar el inventario del pedido.');
+        return;
+      }
+    }
+
     commitStatusChange({
       order,
       nextStatus: SPECIAL_ORDER_STATUS.delivered,
       description: 'Pedido entregado al cliente.',
       patch: {
-        deliveredAt: new Date().toISOString()
+        deliveredAt: new Date().toISOString(),
+        stockDeducted: true
       }
     });
   };
 
-  const undoDeliveredOrder = (order) => {
+  const undoDeliveredOrder = async (order) => {
+    if (order.stockDeducted) {
+      try {
+        await adjustInventoryForSpecialOrderItems(order.items, 1);
+      } catch (error) {
+        console.error('Error restaurando inventario del pedido especial:', error);
+        showNotification('error', 'No se pudo restaurar el inventario del pedido.');
+        return;
+      }
+    }
+
     commitStatusChange({
       order,
       nextStatus: SPECIAL_ORDER_STATUS.ready_for_pickup,
       description: 'Entrega revertida. Pedido marcado nuevamente como listo para recoger.',
       patch: {
-        deliveredAt: ''
+        deliveredAt: '',
+        stockDeducted: false
       }
     });
   };

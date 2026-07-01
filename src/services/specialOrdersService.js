@@ -1,4 +1,4 @@
-import { collection, doc, onSnapshot, orderBy, query, setDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, orderBy, query, runTransaction, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { saveAuditLog } from './auditLogService';
 import { savePayment } from './paymentService';
@@ -41,6 +41,40 @@ export const saveSpecialOrder = async (order) => {
   const normalized = normalizeSpecialOrder(order);
   await setDoc(doc(db, 'specialOrders', normalized.id), normalized, { merge: true });
   return normalized;
+};
+
+// direction -1 descuenta stock (entrega), +1 lo devuelve (revertir entrega)
+export const adjustInventoryForSpecialOrderItems = async (items = [], direction = -1) => {
+  const quantityByProduct = new Map();
+  (items || []).forEach((item) => {
+    const productId = item?.productId;
+    const quantity = Number(item?.quantity || 0);
+    if (!productId || !quantity) return;
+    quantityByProduct.set(productId, (quantityByProduct.get(productId) || 0) + quantity);
+  });
+
+  if (quantityByProduct.size === 0) return;
+
+  await runTransaction(db, async (transaction) => {
+    const productSnapshots = await Promise.all(
+      [...quantityByProduct.keys()].map((productId) => {
+        const productRef = doc(db, 'products', productId);
+        return transaction.get(productRef).then((snapshot) => ({ productId, productRef, snapshot }));
+      })
+    );
+
+    productSnapshots.forEach(({ productId, productRef, snapshot }) => {
+      if (!snapshot.exists()) return;
+      const product = snapshot.data();
+      const currentStock = Number(product.stock || 0);
+      const quantity = quantityByProduct.get(productId);
+      const nextStock = Math.max(0, currentStock + direction * quantity);
+      transaction.update(productRef, {
+        stock: nextStock,
+        updatedAt: new Date().toISOString()
+      });
+    });
+  });
 };
 
 export const saveSpecialOrderPayment = async (payment) => {

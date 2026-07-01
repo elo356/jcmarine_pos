@@ -6,7 +6,7 @@ import { subscribeSales } from '../services/salesService';
 import { subscribeProducts } from '../services/inventoryService';
 import { printHtmlDocument } from '../services/printService';
 import { normalizePaymentMethod } from '../utils/paymentUtils';
-import { getNetSaleTotal, getSaleRefunds, isReportableSale } from '../utils/salesUtils';
+import { getNetSaleTotal, getSaleRefunds, isReportableSale, isSpecialOrderPaymentSale } from '../utils/salesUtils';
 import { subscribeSpecialOrderPayments, subscribeSpecialOrders } from '../services/specialOrdersService';
 import {
   buildSpecialOrderPaymentSaleId,
@@ -204,12 +204,17 @@ const Reports = () => {
     }, SPECIAL_ORDER_PAYMENT_KIND.payment);
     const totalRefunds = getRefundsInDateRange().reduce((sum, refund) => sum + refund.amount, 0);
     const totalRevenue = dateRangeSales.reduce((sum, sale) => sum + Number(sale.total || 0), 0) + specialRevenue - totalRefunds;
-    const totalItems = filteredSales.reduce((sum, sale) => 
-      sum + sale.items.reduce((itemSum, item) => itemSum + (item.nonInventory ? 0 : item.quantity), 0), 0
-    );
+    const totalItems = filteredSales.reduce((sum, sale) => {
+      if (isSpecialOrderPaymentSale(sale)) return sum;
+      return sum + sale.items.reduce((itemSum, item) => itemSum + (item.nonInventory ? 0 : item.quantity), 0);
+    }, 0);
     const totalTransactions = filteredSales.length + standaloneTransactions.length;
     const avgTransaction = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
+    // Las ventas espejo de pagos de pedidos especiales no llevan precio/costo real por unidad
+    // (el precio es prorrateado sobre el monto pagado, no sobre lo vendido), asi que su ganancia
+    // se calcula aparte una sola vez al entregar el pedido (ver specialOrderMetrics.deliveredProfit).
     const totalProfit = filteredSales.reduce((sum, sale) => {
+      if (isSpecialOrderPaymentSale(sale)) return sum;
       return sum + sale.items.reduce((itemSum, item) => {
         if (!item.productId || item.nonInventory) return itemSum;
         const product = products.find(p => p.id === item.productId);
@@ -233,6 +238,7 @@ const Reports = () => {
     const categorySales = {};
 
     filteredSales.forEach(sale => {
+      if (isSpecialOrderPaymentSale(sale)) return;
       const saleRefunds = getSaleRefunds(sale);
       sale.items.forEach((item, index) => {
         if (!item.productId || item.nonInventory) return;
@@ -339,6 +345,7 @@ const Reports = () => {
     const productSales = {};
 
     filteredSales.forEach(sale => {
+      if (isSpecialOrderPaymentSale(sale)) return;
       const saleRefunds = getSaleRefunds(sale);
       sale.items.forEach((item, index) => {
         if (!item.productId || item.nonInventory) return;

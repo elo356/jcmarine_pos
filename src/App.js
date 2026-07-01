@@ -39,6 +39,7 @@ import { useAuth } from './contexts/AuthContext';
 import { startSessionPresence } from './services/systemPresenceService';
 import { useActiveSystemsCount } from './hooks/useActiveSystemsCount';
 import { purgeDemoDataIfNeeded } from './services/dataCleanupService';
+import { backfillSpecialOrderInventoryIfNeeded } from './services/specialOrderInventoryBackfillService';
 import { useRoleDefinitions } from './hooks/useRoleDefinitions';
 import { verifyFirestoreAvailability } from './services/firestoreHealthService';
 
@@ -111,6 +112,13 @@ function App() {
     if (profile?.role !== 'admin') return;
     purgeDemoDataIfNeeded().catch((error) => {
       console.error('Error purging demo data:', error);
+    });
+  }, [profile?.role]);
+
+  useEffect(() => {
+    if (profile?.role !== 'admin') return;
+    backfillSpecialOrderInventoryIfNeeded().catch((error) => {
+      console.error('Error backfilling special order inventory:', error);
     });
   }, [profile?.role]);
 

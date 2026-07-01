@@ -283,7 +283,7 @@ const StorePage = () => {
     const taxes = roundMoney(paidSales.reduce((sum, sale) => sum + Number(sale.tax || 0), 0));
     const totalTendered = roundMoney(paidSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + activeStandaloneSpecialRevenue);
     const cashPayments = roundMoney(
-      paidSales
+      activeSessionSales
         .reduce((sum, sale) => sum + getSaleTenderTotalByMethod(sale, PAYMENT_METHODS.cash), 0) +
       getStandaloneSpecialOrderPaymentTotal(
         standalonePayments,
@@ -1139,6 +1139,7 @@ const StorePage = () => {
                   <div className="flex justify-between"><span>Taxes</span><strong>{formatCurrency(closeSummary.taxes)}</strong></div>
                   <div className="flex justify-between border-t pt-2"><span>Total Tendered</span><strong>{formatCurrency(closeSummary.totalTendered)}</strong></div>
                   <div className="flex justify-between"><span>Cash</span><strong>{formatCurrency(closeSummary.tenders.cash)}</strong></div>
+                  <div className="flex justify-between"><span>ACH</span><strong>{formatCurrency(closeSummary.tenders.ach)}</strong></div>
                   <div className="flex justify-between"><span>ATH Móvil</span><strong>{formatCurrency(closeSummary.tenders.athMovil)}</strong></div>
                   <div className="flex justify-between"><span>Tarjeta</span><strong>{formatCurrency(closeSummary.tenders.card)}</strong></div>
                   <div className="flex justify-between"><span>PayPal</span><strong>{formatCurrency(closeSummary.tenders.paypal)}</strong></div>

@@ -188,6 +188,29 @@ async function createWindow() {
     callback(permission === 'media');
   });
 
+  // Electron shows no native right-click menu unless we build one ourselves,
+  // so Cortar/Copiar/Pegar via mouse silently did nothing. Build a minimal
+  // one for editable fields and text selections.
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const menuTemplate = [];
+
+    if (params.isEditable) {
+      menuTemplate.push(
+        { role: 'cut', enabled: params.editFlags.canCut },
+        { role: 'copy', enabled: params.editFlags.canCopy },
+        { role: 'paste', enabled: params.editFlags.canPaste },
+        { type: 'separator' },
+        { role: 'selectAll', enabled: params.editFlags.canSelectAll }
+      );
+    } else if (params.selectionText) {
+      menuTemplate.push({ role: 'copy' });
+    }
+
+    if (menuTemplate.length === 0) return;
+
+    Menu.buildFromTemplate(menuTemplate).popup({ window: mainWindow });
+  });
+
   let appUrl;
   if (IS_DEV) {
     // Dev: load from React dev server (npm start)

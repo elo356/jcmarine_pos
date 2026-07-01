@@ -254,12 +254,6 @@ function Sales() {
       : null),
     [selectedSale, specialOrders]
   );
-  const selectedSaleDisplaySummary = useMemo(
-    () => (selectedSaleSpecialOrder
-      ? getSpecialOrderFinancialSummary(selectedSaleSpecialOrder)
-      : selectedSaleSummary),
-    [selectedSaleSpecialOrder, selectedSaleSummary]
-  );
   const refundItemOptions = useMemo(() => {
     if (!refundTarget) return [];
     // If this is a legacy special-order payment sale, prefer original order item pricing
@@ -1108,13 +1102,8 @@ function Sales() {
                 const refundTotal = getSaleRefundTotal(sale);
                 const saleStatus = normalizeSaleStatus(sale.status, sale);
                 const isSpecialPayment = isSpecialOrderPaymentSale(sale);
-                const saleSpecialOrder = isSpecialPayment ? findSpecialOrderForSale(sale, specialOrders) : null;
-                const saleDisplayTotal = saleSpecialOrder
-                  ? getSpecialOrderFinancialSummary(saleSpecialOrder).total
-                  : Number(sale.total || 0);
-                const netTotal = saleSpecialOrder
-                  ? Math.max(0, roundMoney(saleDisplayTotal - refundTotal))
-                  : getNetSaleTotal(sale);
+                const saleDisplayTotal = Number(sale.total || 0);
+                const netTotal = getNetSaleTotal(sale);
                 const refundAllowed = canRefundSale(sale);
                 const exchangeAllowed = canExchangeSale(sale);
 
@@ -1259,28 +1248,34 @@ function Sales() {
                   {isSpecialOrderPaymentSale(selectedSale) && (
                     <div className="flex justify-between"><span>Origen</span><strong>Orden especial {selectedSale.specialOrderNumber || '-'}</strong></div>
                   )}
+                  {selectedSaleSpecialOrder && (
+                    <>
+                      <div className="flex justify-between"><span>Total del pedido</span><strong>{formatCurrency(selectedSaleSpecialOrder.totalAmount || 0)}</strong></div>
+                      <div className="flex justify-between"><span>Balance pendiente del pedido</span><strong>{formatCurrency(selectedSaleSpecialOrder.balanceDue || 0)}</strong></div>
+                    </>
+                  )}
                 </div>
               </div>
               <div className="card p-4">
-                <h3 className="font-semibold mb-3">Totales</h3>
+                <h3 className="font-semibold mb-3">Totales de este pago</h3>
                 <div className="space-y-2 text-sm">
-                  <div className="flex justify-between"><span>Subtotal</span><strong>{formatCurrency(selectedSaleDisplaySummary?.subtotal || 0)}</strong></div>
-                  {(selectedSaleDisplaySummary?.discount || 0) > 0 && (
-                    <div className="flex justify-between text-green-600"><span>Descuento</span><strong>-{formatCurrency(selectedSaleDisplaySummary?.discount || 0)}</strong></div>
+                  <div className="flex justify-between"><span>Subtotal</span><strong>{formatCurrency(selectedSaleSummary?.subtotal || 0)}</strong></div>
+                  {(selectedSaleSummary?.discount || 0) > 0 && (
+                    <div className="flex justify-between text-green-600"><span>Descuento</span><strong>-{formatCurrency(selectedSaleSummary?.discount || 0)}</strong></div>
                   )}
-                  {(selectedSaleDisplaySummary?.discount || 0) > 0 && (
-                    <div className="flex justify-between"><span>Subtotal neto</span><strong>{formatCurrency(Math.max(0, (selectedSaleDisplaySummary?.subtotal || 0) - (selectedSaleDisplaySummary?.discount || 0)))}</strong></div>
+                  {(selectedSaleSummary?.discount || 0) > 0 && (
+                    <div className="flex justify-between"><span>Subtotal neto</span><strong>{formatCurrency(Math.max(0, (selectedSaleSummary?.subtotal || 0) - (selectedSaleSummary?.discount || 0)))}</strong></div>
                   )}
-                  {(selectedSaleDisplaySummary?.taxBreakdown?.state || 0) > 0 && (
-                    <div className="flex justify-between"><span>IVU estatal</span><strong>{formatCurrency(selectedSaleDisplaySummary?.taxBreakdown?.state || 0)}</strong></div>
+                  {(selectedSaleSummary?.taxBreakdown?.state || 0) > 0 && (
+                    <div className="flex justify-between"><span>IVU estatal</span><strong>{formatCurrency(selectedSaleSummary?.taxBreakdown?.state || 0)}</strong></div>
                   )}
-                  {(selectedSaleDisplaySummary?.taxBreakdown?.municipal || 0) > 0 && (
-                    <div className="flex justify-between"><span>IVU municipal</span><strong>{formatCurrency(selectedSaleDisplaySummary?.taxBreakdown?.municipal || 0)}</strong></div>
+                  {(selectedSaleSummary?.taxBreakdown?.municipal || 0) > 0 && (
+                    <div className="flex justify-between"><span>IVU municipal</span><strong>{formatCurrency(selectedSaleSummary?.taxBreakdown?.municipal || 0)}</strong></div>
                   )}
-                  {(selectedSaleDisplaySummary?.taxBreakdown?.state || 0) <= 0 && (selectedSaleDisplaySummary?.taxBreakdown?.municipal || 0) <= 0 && (selectedSaleDisplaySummary?.tax || 0) > 0 && (
-                    <div className="flex justify-between"><span>IVU</span><strong>{formatCurrency(selectedSaleDisplaySummary?.tax || 0)}</strong></div>
+                  {(selectedSaleSummary?.taxBreakdown?.state || 0) <= 0 && (selectedSaleSummary?.taxBreakdown?.municipal || 0) <= 0 && (selectedSaleSummary?.tax || 0) > 0 && (
+                    <div className="flex justify-between"><span>IVU</span><strong>{formatCurrency(selectedSaleSummary?.tax || 0)}</strong></div>
                   )}
-                  <div className="flex justify-between"><span>Total</span><strong>{formatCurrency(selectedSaleDisplaySummary?.total || 0)}</strong></div>
+                  <div className="flex justify-between"><span>Total pagado</span><strong>{formatCurrency(selectedSaleSummary?.total || 0)}</strong></div>
                   <div className="flex justify-between"><span>Refunds</span><strong className="text-red-600">-{formatCurrency(getSaleRefundTotal(selectedSale))}</strong></div>
                   <div className="flex justify-between"><span>Neto</span><strong className="text-emerald-700">{formatCurrency(getNetSaleTotal(selectedSale))}</strong></div>
                 </div>
@@ -1323,7 +1318,7 @@ function Sales() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(selectedSaleSpecialOrder?.items || selectedSaleSummary?.items || selectedSale.items || []).map((item, index) => (
+                    {(selectedSaleSummary?.items || selectedSale.items || []).map((item, index) => (
                       <tr key={`${selectedSale.id}_item_${index}`}>
                         <td>
                           <div>{item.name}</div>
