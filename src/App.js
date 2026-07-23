@@ -12,6 +12,7 @@ import {
   BarChart3,
   Printer,
   ClipboardList,
+  History,
   FileText,
   Settings,
   Menu,
@@ -25,6 +26,7 @@ import Products from './pages/Products';
 import Sales from './pages/Sales';
 import Notes from './pages/Notes';
 import Inventory from './pages/Inventory';
+import Logs from './pages/Logs';
 import Shifts from './pages/Shifts';
 import StorePage from './pages/Store';
 import OnlineStore from './pages/OnlineStore';
@@ -38,10 +40,14 @@ import Login from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
 import { startSessionPresence } from './services/systemPresenceService';
 import { useActiveSystemsCount } from './hooks/useActiveSystemsCount';
+import { useWeeklyShiftAutoClose } from './hooks/useWeeklyShiftAutoClose';
 import { purgeDemoDataIfNeeded } from './services/dataCleanupService';
 import { backfillSpecialOrderInventoryIfNeeded } from './services/specialOrderInventoryBackfillService';
 import { useRoleDefinitions } from './hooks/useRoleDefinitions';
 import { verifyFirestoreAvailability } from './services/firestoreHealthService';
+import { subscribePendingSyncQueue, syncPendingQueue } from './services/pendingSyncService';
+import { getCachedSystemSettings, subscribeSystemSettings } from './services/settingsService';
+import { checkAndRunAutoBackup } from './services/backupService';
 
 const SIDEBAR_ITEMS = [
   { id: 'dashboard', label: 'Panel', icon: LayoutDashboard },
@@ -51,6 +57,7 @@ const SIDEBAR_ITEMS = [
   { id: 'notes', label: 'Notas', icon: ClipboardList },
   { id: 'special_orders', label: 'Pedidos especiales', icon: ClipboardList },
   { id: 'inventory', label: 'Inventario', icon: Warehouse },
+  { id: 'inventory_logs', label: 'Bitacora de inventario', icon: History },
   { id: 'shifts', label: 'Turnos', icon: Clock },
   { id: 'store', label: 'Tienda', icon: Store },
   { id: 'online_store', label: 'Tienda online', icon: Globe2 },
@@ -69,7 +76,9 @@ function App() {
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [pendingProductDraft, setPendingProductDraft] = useState(null);
   const [firestoreStatus, setFirestoreStatus] = useState({ ok: true, checking: true, error: null });
+  const [pendingSyncQueue, setPendingSyncQueue] = useState([]);
   const activeSystemsCount = useActiveSystemsCount(profile?.role === 'admin');
+  useWeeklyShiftAutoClose(Boolean(user));
 
   const allowedPages = useMemo(() => {
     const normalizedRole = profile?.role === 'inventory' ? 'manager' : (profile?.role || 'cashier');
@@ -84,6 +93,8 @@ function App() {
           ? allowedPages.includes('online_store') || allowedPages.includes('store')
           : item.id === 'settings'
             ? allowedPages.includes('settings') || allowedPages.includes('manage_roles') || profile?.role === 'admin'
+          : item.id === 'inventory_logs'
+            ? allowedPages.includes('inventory_logs') || profile?.role === 'admin'
           : allowedPages.includes(item.id);
       return hasAccess && (!item.adminOnly || profile?.role === 'admin');
     }),
@@ -97,6 +108,8 @@ function App() {
         ? allowedPages.includes('online_store') || allowedPages.includes('store')
       : currentPage === 'settings'
         ? allowedPages.includes('settings') || allowedPages.includes('manage_roles') || profile?.role === 'admin'
+      : currentPage === 'inventory_logs'
+        ? allowedPages.includes('inventory_logs') || profile?.role === 'admin'
       : allowedPages.includes(currentPage);
     if (!hasAccessToCurrentPage) {
       setCurrentPage(allowedPages[0] || 'dashboard');
@@ -130,8 +143,46 @@ function App() {
       checking: false,
       error: status.error || null
     });
+    if (status.ok) {
+      syncPendingQueue().catch((error) => {
+        console.error('Error syncing pending queue:', error);
+      });
+    }
     return status;
   };
+
+  useEffect(() => {
+    if (!user) return undefined;
+    return subscribePendingSyncQueue(setPendingSyncQueue);
+  }, [user]);
+
+  // Corre la copia de seguridad automatica desde aqui (siempre montado) en vez de
+  // depender de que alguien tenga la pagina de Configuracion abierta.
+  useEffect(() => {
+    if (!user) return undefined;
+
+    const attemptAutoBackup = (settings) => {
+      checkAndRunAutoBackup(settings?.backup).catch((error) => {
+        console.error('[backup] Auto-backup failed:', error);
+      });
+    };
+
+    const unsubscribe = subscribeSystemSettings(
+      (settings, meta = {}) => {
+        if (!meta.fromCache) attemptAutoBackup(settings);
+      },
+      (error) => console.error('Error loading system settings for auto-backup:', error)
+    );
+
+    const intervalId = window.setInterval(() => {
+      attemptAutoBackup(getCachedSystemSettings());
+    }, 30 * 60 * 1000);
+
+    return () => {
+      unsubscribe();
+      window.clearInterval(intervalId);
+    };
+  }, [user]);
 
   useEffect(() => {
     if (!user) return undefined;
@@ -158,6 +209,23 @@ function App() {
       window.removeEventListener('offline', handleOffline);
     };
   }, [user]);
+
+  // En algunas instalaciones de Electron/Windows el foco de la ventana puede
+  // volver al WebContents sin volver al campo que se acaba de pulsar. Forzar el
+  // foco del elemento editable evita que todos los inputs parezcan bloqueados.
+  useEffect(() => {
+    const restoreEditableFocus = (event) => {
+      const target = event.target instanceof Element
+        ? event.target.closest('input, textarea, select, [contenteditable="true"]')
+        : null;
+
+      if (!target || target.disabled || target.readOnly) return;
+      window.requestAnimationFrame(() => target.focus({ preventScroll: true }));
+    };
+
+    document.addEventListener('pointerdown', restoreEditableFocus, true);
+    return () => document.removeEventListener('pointerdown', restoreEditableFocus, true);
+  }, []);
 
   const renderPage = () => {
     switch (currentPage) {
@@ -199,6 +267,8 @@ function App() {
         );
       case 'inventory':
         return <Inventory />;
+      case 'inventory_logs':
+        return <Logs />;
       case 'shifts':
         return <Shifts />;
       case 'store':
@@ -389,6 +459,28 @@ function App() {
           </header>
 
           <div className="p-4 lg:p-8">{renderPage()}</div>
+          {pendingSyncQueue.length > 0 && (
+            <div className="fixed bottom-4 left-4 right-4 lg:left-auto lg:right-6 lg:w-[30rem] z-50 rounded-lg border border-amber-300 bg-amber-50 p-4 shadow-lg">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="font-semibold text-amber-900">
+                    {pendingSyncQueue.length} operacion(es) sin sincronizar con el inventario
+                  </p>
+                  <p className="mt-1 text-sm text-amber-800">
+                    Ventas, ajustes o reembolsos hechos en este equipo que todavia no se confirmaron
+                    con el servidor. El stock puede no reflejar la realidad hasta que se sincronicen.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => syncPendingQueue().catch((error) => console.error('Error syncing pending queue:', error))}
+                  className="btn btn-secondary whitespace-nowrap"
+                >
+                  Reintentar ahora
+                </button>
+              </div>
+            </div>
+          )}
           {!firestoreStatus.ok && (
             <div className="fixed bottom-4 left-4 right-4 lg:left-auto lg:right-6 lg:w-[30rem] z-50 rounded-lg border border-red-300 bg-red-50 p-4 shadow-lg">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

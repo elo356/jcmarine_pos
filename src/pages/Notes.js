@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, Clock3, Pencil, Plus, Save, Search, Trash2 } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, CheckCircle2, Clock3, Pencil, Plus, RotateCcw, Save, Search, Trash2 } from 'lucide-react';
 import Notification from '../components/Notification';
 import { useAuth } from '../contexts/AuthContext';
 import { generateId } from '../data/demoData';
-import { deleteNote, saveNote, subscribeNotes } from '../services/notesService';
+import { deleteNote, NOTE_TRASH_RETENTION_DAYS, restoreNote, saveNote, subscribeDeletedNotes, subscribeNotes } from '../services/notesService';
 
 const EMPTY_FORM = {
   id: '',
@@ -55,6 +55,8 @@ const getPreview = (content = '') => {
 function Notes() {
   const { user, profile } = useAuth();
   const [notes, setNotes] = useState([]);
+  const [trashedNotes, setTrashedNotes] = useState([]);
+  const [viewMode, setViewMode] = useState('notes');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedNoteId, setSelectedNoteId] = useState('');
   const [form, setForm] = useState(EMPTY_FORM);
@@ -62,6 +64,8 @@ function Notes() {
   const [notification, setNotification] = useState(null);
   const [syncMeta, setSyncMeta] = useState({ fromCache: true, failed: false });
   const [isSaving, setIsSaving] = useState(false);
+  const [notePendingDeletion, setNotePendingDeletion] = useState(null);
+  const noteEditorRef = useRef(null);
 
   useEffect(() => {
     const unsubscribe = subscribeNotes(
@@ -78,19 +82,28 @@ function Notes() {
   }, []);
 
   useEffect(() => {
+    const unsubscribe = subscribeDeletedNotes(
+      (rows) => setTrashedNotes(rows || []),
+      (error) => console.error('Error subscribing deleted notes:', error)
+    );
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     if (!selectedNoteId) return;
-    const selected = notes.find((note) => note.id === selectedNoteId);
+    const selected = (viewMode === 'trash' ? trashedNotes : notes).find((note) => note.id === selectedNoteId);
     if (!selected) {
       setSelectedNoteId('');
       setForm(EMPTY_FORM);
     }
-  }, [notes, selectedNoteId]);
+  }, [notes, selectedNoteId, trashedNotes, viewMode]);
 
   const filteredNotes = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    const statusFiltered = statusFilter === 'all'
-      ? notes
-      : notes.filter((note) => getNoteStatus(note) === statusFilter);
+    const currentNotes = viewMode === 'trash' ? trashedNotes : notes;
+    const statusFiltered = viewMode === 'trash' || statusFilter === 'all'
+      ? currentNotes
+      : currentNotes.filter((note) => getNoteStatus(note) === statusFilter);
 
     const byDateDesc = (a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0);
     const sorted = [...statusFiltered].sort(byDateDesc);
@@ -100,7 +113,7 @@ function Notes() {
     return sorted.filter((note) => (
       note.title.toLowerCase().includes(query) || note.content.toLowerCase().includes(query)
     ));
-  }, [notes, searchQuery, statusFilter]);
+  }, [notes, searchQuery, statusFilter, trashedNotes, viewMode]);
 
   const noteCounts = useMemo(() => ({
     all: notes.length,
@@ -109,8 +122,8 @@ function Notes() {
   }), [notes]);
 
   const selectedNote = useMemo(
-    () => notes.find((note) => note.id === selectedNoteId) || null,
-    [notes, selectedNoteId]
+    () => (viewMode === 'trash' ? trashedNotes : notes).find((note) => note.id === selectedNoteId) || null,
+    [notes, selectedNoteId, trashedNotes, viewMode]
   );
 
   const showNotification = (type, message) => {
@@ -193,20 +206,48 @@ function Notes() {
     );
   };
 
-  const handleDeleteNote = async (note) => {
+  const confirmDeleteNote = async () => {
+    const note = notePendingDeletion;
     if (!note) return;
-    if (!window.confirm(`¿Eliminar la nota "${note.title || 'Sin titulo'}"?`)) return;
+    setNotePendingDeletion(null);
 
-    const result = await deleteNote(note.id);
+    const result = await deleteNote(note, {
+      id: user?.uid || '',
+      name: profile?.name || user?.email || 'Usuario'
+    });
     if (selectedNoteId === note.id) {
       startNewNote();
+      window.requestAnimationFrame(() => noteEditorRef.current?.focus());
     }
 
     if (result.localOnly) {
-      showNotification('warning', 'La nota se elimino del cache local, pero no se pudo sincronizar en la nube.');
+      showNotification('warning', 'La nota se movio a la papelera local, pero no se pudo sincronizar en la nube.');
     } else {
-      showNotification('success', 'Nota eliminada.');
+      showNotification('success', `Nota movida a la papelera por ${NOTE_TRASH_RETENTION_DAYS} dias.`);
     }
+  };
+
+  const handleRestoreNote = async (note) => {
+    if (!note) return;
+    const result = await restoreNote(note, {
+      id: user?.uid || '',
+      name: profile?.name || user?.email || 'Usuario'
+    });
+    // El boton de restaurar desaparece al volver a la lista. Seleccionamos la
+    // nota recuperada y devolvemos el foco al editor para que se pueda seguir
+    // escribiendo sin tener que cerrar ni reiniciar la aplicacion.
+    setViewMode('notes');
+    setSelectedNoteId(result.id);
+    setForm({
+      id: result.id,
+      title: result.title,
+      content: result.content,
+      status: getNoteStatus(result)
+    });
+    window.requestAnimationFrame(() => noteEditorRef.current?.focus());
+    showNotification(result.localOnly ? 'warning' : 'success', result.localOnly
+      ? 'La nota se restauro solo en este equipo hasta que vuelva la conexion.'
+      : 'Nota restaurada correctamente.');
   };
 
   return (
@@ -218,6 +259,31 @@ function Notes() {
           message={notification.message}
           onClose={() => setNotification(null)}
         />
+      )}
+
+      {notePendingDeletion && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 cursor-default bg-black/50"
+            aria-label="Cancelar eliminacion"
+            onClick={() => setNotePendingDeletion(null)}
+          />
+          <div className="relative w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+            <h2 className="text-xl font-semibold text-gray-900">¿Mover nota a la papelera?</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              “{notePendingDeletion.title || 'Sin titulo'}” se podra restaurar durante {NOTE_TRASH_RETENTION_DAYS} dias.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" className="btn btn-secondary" onClick={() => setNotePendingDeletion(null)}>
+                Cancelar
+              </button>
+              <button type="button" className="btn btn-danger" onClick={confirmDeleteNote}>
+                Mover a papelera
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       
@@ -246,10 +312,19 @@ function Notes() {
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[22rem,minmax(0,1fr)]">
         <div className="card p-4 space-y-4">
-          <button type="button" onClick={startNewNote} className="w-full btn btn-primary">
+          {viewMode === 'notes' && <button type="button" onClick={startNewNote} className="w-full btn btn-primary">
             <Plus size={18} />
             Nueva nota
-          </button>
+          </button>}
+
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => { setViewMode('notes'); startNewNote(); }} className={`rounded-lg border px-3 py-2 text-sm font-medium ${viewMode === 'notes' ? 'border-primary-300 bg-primary-50 text-primary-700' : 'border-gray-200 bg-white text-gray-600'}`}>
+              Notas <span className="text-xs">{notes.length}</span>
+            </button>
+            <button type="button" onClick={() => { setViewMode('trash'); startNewNote(); }} className={`rounded-lg border px-3 py-2 text-sm font-medium ${viewMode === 'trash' ? 'border-primary-300 bg-primary-50 text-primary-700' : 'border-gray-200 bg-white text-gray-600'}`}>
+              Papelera <span className="text-xs">{trashedNotes.length}</span>
+            </button>
+          </div>
 
           <div className="relative">
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -262,7 +337,7 @@ function Notes() {
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
+          {viewMode === 'notes' && <div className="grid grid-cols-3 gap-2">
             {[
               { id: 'all', label: 'Todas', count: noteCounts.all },
               { id: 'pending', label: 'Rojas', count: noteCounts.pending },
@@ -282,12 +357,12 @@ function Notes() {
                 <span className="ml-1 text-xs text-gray-500">{option.count}</span>
               </button>
             ))}
-          </div>
+          </div>}
 
           <div className="space-y-3 max-h-[38rem] overflow-y-auto pr-1">
             {filteredNotes.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-200 px-4 py-10 text-center text-sm text-gray-500">
-                No hay notas que coincidan.
+                {viewMode === 'trash' ? 'La papelera esta vacia.' : 'No hay notas que coincidan.'}
               </div>
             ) : (
               filteredNotes.map((note) => {
@@ -316,7 +391,7 @@ function Notes() {
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2 text-xs text-gray-500">
                         <Clock3 size={14} />
-                        <span>{formatDateTime(note.updatedAt || note.createdAt)}</span>
+                      <span>{viewMode === 'trash' ? `Eliminada: ${formatDateTime(note.deletedAt)}` : formatDateTime(note.updatedAt || note.createdAt)}</span>
                       </div>
                       <span className={`rounded-full border px-2 py-1 text-xs font-medium ${statusOption.badgeClass}`}>
                         {statusOption.label}
@@ -329,7 +404,19 @@ function Notes() {
           </div>
         </div>
 
-        <div className="card p-6 space-y-5">
+        {viewMode === 'trash' ? (
+          <div className="card p-6 space-y-5">
+            {selectedNote ? <>
+              <div className="flex items-start justify-between gap-4">
+                <div><h2 className="text-xl font-semibold text-gray-900">{selectedNote.title || 'Sin titulo'}</h2><p className="mt-1 text-sm text-gray-500">Eliminada el {formatDateTime(selectedNote.deletedAt)}. Se borrara permanentemente el {formatDateTime(selectedNote.expiresAt)}.</p></div>
+                <Trash2 size={24} className="text-gray-400" />
+              </div>
+              <div className="rounded-xl bg-gray-50 p-4 whitespace-pre-wrap text-gray-700 min-h-[12rem]">{selectedNote.content || 'Sin contenido'}</div>
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">Esta nota permanecera en la papelera durante {NOTE_TRASH_RETENTION_DAYS} dias desde su eliminacion.</div>
+              <button type="button" onClick={() => handleRestoreNote(selectedNote)} className="btn btn-primary"><RotateCcw size={18} />Restaurar nota</button>
+            </> : <div className="py-20 text-center text-gray-500"><Trash2 size={32} className="mx-auto mb-3 text-gray-300" />Selecciona una nota de la papelera para verla o restaurarla.</div>}
+          </div>
+        ) : <div className="card p-6 space-y-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
               <h2 className="text-xl font-semibold text-gray-900">
@@ -399,6 +486,7 @@ function Notes() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Nota</label>
               <textarea
+                ref={noteEditorRef}
                 value={form.content}
                 onChange={(e) => setForm((current) => ({ ...current, content: e.target.value }))}
                 placeholder="Escribe aqui los detalles importantes..."
@@ -424,7 +512,7 @@ function Notes() {
                 Limpiar
               </button>
               {selectedNote && (
-                <button type="button" onClick={() => handleDeleteNote(selectedNote)} className="btn btn-danger">
+                <button type="button" onClick={() => setNotePendingDeletion(selectedNote)} className="btn btn-danger">
                   <Trash2 size={18} />
                   Borrar
                 </button>
@@ -436,7 +524,7 @@ function Notes() {
               {isSaving ? 'Guardando...' : selectedNote ? 'Guardar cambios' : 'Guardar nota'}
             </button>
           </div>
-        </div>
+        </div>}
       </div>
     </div>
   );

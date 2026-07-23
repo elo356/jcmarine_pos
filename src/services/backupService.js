@@ -1,5 +1,3 @@
-'use strict';
-
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config';
 
@@ -103,4 +101,24 @@ export const runBackup = async (folder, onProgress) => {
   const now = new Date().toISOString();
   setBackupState({ lastBackupAt: now, lastBackupPath: result?.savedPath });
   return { ...result, exportedAt: data.exportedAt };
+};
+
+// ── Automatic backup ─────────────────────────────────────────────────────────
+// Se llama desde App.js (siempre montado mientras la app esta abierta) en vez de
+// desde la pagina de Configuracion, para que la copia se dispare aunque nadie
+// tenga esa pagina abierta.
+let autoBackupRunning = false;
+
+export const checkAndRunAutoBackup = async (backupSettings) => {
+  if (!backupSettings?.enabled || autoBackupRunning) return null;
+
+  const { lastBackupAt, folder } = getBackupState();
+  if (!isBackupDue(backupSettings.intervalDays, lastBackupAt)) return null;
+
+  autoBackupRunning = true;
+  try {
+    return await runBackup(folder);
+  } finally {
+    autoBackupRunning = false;
+  }
 };

@@ -27,6 +27,7 @@ import {
 } from '../services/posCartService';
 import { subscribeCategories } from '../services/categoryService';
 import { commitSaleTransaction } from '../services/checkoutService';
+import { queuePendingSale, syncPendingQueue } from '../services/pendingSyncService';
 import { verifyFirestoreAvailability } from '../services/firestoreHealthService';
 import { subscribeStoreStatusLogs } from '../services/storeStatusLogService';
 import { upsertWeeklyCachedSale } from '../services/weeklySalesCacheService';
@@ -1024,7 +1025,25 @@ function POS({
       showNotification('success', options.successMessage || 'Pago confirmado y transaccion guardada.');
     } catch (error) {
       console.error('Error finalizing payment:', error);
+
+      if (error?.code === 'missing-product') {
+        showNotification(
+          'error',
+          'No se pudo completar la venta: uno o mas productos del carrito ya no existen en el inventario. Revisa el carrito e intenta de nuevo.'
+        );
+        return;
+      }
+
+      queuePendingSale({
+        sale,
+        paymentEntries,
+        cartItems: cart,
+        updatedBy: sharedCartEditor
+      });
       persistSaleLocally();
+      syncPendingQueue().catch((syncError) => {
+        console.error('Error retrying pending sync queue:', syncError);
+      });
 
       if (options.openDrawer) {
         openCashDrawer();
@@ -1038,7 +1057,7 @@ function POS({
       resetPaymentState();
       showNotification(
         'warning',
-        options.warningMessage || 'Pago guardado localmente. Firestore fallo, pero la venta no se perdio.'
+        options.warningMessage || 'Venta guardada localmente. No se pudo confirmar con el servidor todavia; se reintentara sincronizar el inventario automaticamente.'
       );
     } finally {
       setIsProcessingPayment(false);

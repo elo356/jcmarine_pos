@@ -2,6 +2,8 @@ import { collection, doc, onSnapshot, orderBy, query, runTransaction, setDoc, wr
 import { db } from '../firebase/config';
 import { getNetSaleTotal, normalizeSaleRefund, normalizeSaleStatus } from '../utils/salesUtils';
 import { mergeWeeklyCachedSales, syncWeeklySalesCache, upsertWeeklyCachedSale } from './weeklySalesCacheService';
+import { generateId } from '../data/demoData';
+import { buildInventoryLogEntry, INVENTORY_MOVEMENT_TYPES } from '../utils/inventoryLogUtils';
 
 const salesCol = collection(db, 'sales');
 
@@ -35,7 +37,7 @@ export const refundSale = async (sale, refundInput) => {
     refunds
   });
 
-  return saveSale({
+  const nextSale = {
     ...sale,
     refunds,
     status,
@@ -43,7 +45,62 @@ export const refundSale = async (sale, refundInput) => {
     refunded_at: refundRecord.refundedAt,
     refunded_by: refundRecord.refundedBy,
     refundedAmount: Math.round((Number(sale.total || 0) - getNetSaleTotal({ ...sale, refunds })) * 100) / 100
+  };
+
+  // Solo se restituye stock cuando el reembolso esta atado a un producto especifico
+  // (item + cantidad); un reembolso de monto general sin item asociado no toca inventario.
+  const restockItems = (refundRecord.items || []).filter(
+    (item) => item?.productId && Number(item.quantity) > 0
+  );
+
+  await runTransaction(db, async (transaction) => {
+    const productUpdates = [];
+    const logEntries = [];
+
+    for (const item of restockItems) {
+      const productRef = doc(db, 'products', item.productId);
+      const productSnapshot = await transaction.get(productRef);
+      if (!productSnapshot.exists()) continue;
+
+      const product = productSnapshot.data();
+      const quantity = Number(item.quantity || 0);
+      const currentStock = Number(product.stock || 0);
+      const nextStock = currentStock + quantity;
+      const payload = {
+        stock: nextStock,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (Array.isArray(product.sizeStocks) && product.sizeStocks.length > 0 && item.selectedSize) {
+        payload.sizeStocks = applyStockChangeToSizeStocks(product.sizeStocks, item.selectedSize, quantity);
+      }
+
+      productUpdates.push({ productRef, payload: sanitizeFirestoreValue(payload) });
+      logEntries.push(buildInventoryLogEntry({
+        id: generateId('invlog'),
+        productId: item.productId,
+        productName: product.name || item.productId,
+        type: INVENTORY_MOVEMENT_TYPES.refund,
+        quantity,
+        oldStock: currentStock,
+        newStock: nextStock,
+        reason: `Reembolso venta ${sale.id}`,
+        performedBy: refundRecord.refundedBy,
+        reference: sale.id
+      }));
+    }
+
+    transaction.set(doc(db, 'sales', nextSale.id), sanitizeFirestoreValue(nextSale), { merge: true });
+    productUpdates.forEach(({ productRef, payload }) => {
+      transaction.update(productRef, payload);
+    });
+    logEntries.forEach((log) => {
+      transaction.set(doc(db, 'inventoryLogs', log.id), log);
+    });
   });
+
+  upsertWeeklyCachedSale(nextSale);
+  return nextSale;
 };
 
 const applyStockChangeToSizeStocks = (sizeStocks = [], selectedSize = '', quantityDelta = 0) => {
@@ -89,32 +146,86 @@ export const registerSaleExchange = async ({
 
   await runTransaction(db, async (transaction) => {
     const productUpdates = [];
+    const logEntries = [];
 
-    for (const change of stockChanges) {
-      if (!change?.productId || !Number.isFinite(Number(change.quantityDelta))) continue;
+    const changesByProduct = stockChanges.reduce((map, change) => {
+      if (!change?.productId || !Number.isFinite(Number(change.quantityDelta))) return map;
+      const rows = map.get(change.productId) || [];
+      rows.push(change);
+      map.set(change.productId, rows);
+      return map;
+    }, new Map());
 
-      const productRef = doc(db, 'products', change.productId);
+    for (const [productId, productChanges] of changesByProduct.entries()) {
+      const productRef = doc(db, 'products', productId);
       const productSnapshot = await transaction.get(productRef);
-      if (!productSnapshot.exists()) continue;
+      if (!productSnapshot.exists()) {
+        throw new Error(`No se encontro el producto ${productId} para actualizar inventario del cambio.`);
+      }
 
       const product = productSnapshot.data();
-      const quantityDelta = Number(change.quantityDelta || 0);
+      const quantityDelta = productChanges.reduce((sum, change) => sum + Number(change.quantityDelta || 0), 0);
+      const currentStock = Number(product.stock || 0);
+      const nextStock = currentStock + quantityDelta;
+
+      if (nextStock < 0) {
+        throw new Error(`No hay stock suficiente de ${product.name || productId} para completar el cambio.`);
+      }
+
       const payload = {
-        stock: Math.max(0, Number(product.stock || 0) + quantityDelta),
+        stock: nextStock,
         updatedAt: new Date().toISOString()
       };
 
       if (Array.isArray(product.sizeStocks) && product.sizeStocks.length > 0) {
-        payload.sizeStocks = applyStockChangeToSizeStocks(
-          product.sizeStocks,
-          change.selectedSize || '',
-          quantityDelta
+        const sizeDeltas = productChanges.reduce((map, change) => {
+          const selectedSize = change.selectedSize || '';
+          if (!selectedSize) return map;
+          map.set(selectedSize, (map.get(selectedSize) || 0) + Number(change.quantityDelta || 0));
+          return map;
+        }, new Map());
+
+        for (const [selectedSize, sizeDelta] of sizeDeltas.entries()) {
+          const sizeEntry = product.sizeStocks.find((entry) => entry.size === selectedSize);
+
+          if (!sizeEntry) {
+            throw new Error(`No se encontro la talla ${selectedSize} de ${product.name || productId}.`);
+          }
+
+          if (Number(sizeEntry.stock || 0) + sizeDelta < 0) {
+            throw new Error(`No hay stock suficiente de ${product.name || productId} en talla ${selectedSize}.`);
+          }
+        }
+
+        payload.sizeStocks = [...sizeDeltas.entries()].reduce(
+          (rows, [selectedSize, sizeDelta]) => applyStockChangeToSizeStocks(rows, selectedSize, sizeDelta),
+          product.sizeStocks
         );
       }
 
       productUpdates.push({
         productRef,
         payload: sanitizeFirestoreValue(payload)
+      });
+
+      let runningStock = currentStock;
+      productChanges.forEach((change) => {
+        const changeDelta = Number(change.quantityDelta || 0);
+        const afterChangeStock = runningStock + changeDelta;
+        logEntries.push(buildInventoryLogEntry({
+          id: generateId('invlog'),
+          productId,
+          productName: product.name || change.productName || productId,
+          type: changeDelta > 0 ? INVENTORY_MOVEMENT_TYPES.exchangeIn : INVENTORY_MOVEMENT_TYPES.exchangeOut,
+          quantity: Math.abs(changeDelta),
+          oldStock: runningStock,
+          newStock: afterChangeStock,
+          reason: change.reason || `Cambio venta ${originalSale.id}`,
+          performedBy: change.performedBy || nextSale.chargedBy || nextSale.cashier || 'Sistema',
+          performedById: change.performedById || nextSale.chargedById || nextSale.cashierId || '',
+          reference: change.reference || nextSale.id
+        }));
+        runningStock = afterChangeStock;
       });
     }
 
@@ -131,6 +242,10 @@ export const registerSaleExchange = async ({
 
     productUpdates.forEach(({ productRef, payload }) => {
       transaction.update(productRef, payload);
+    });
+
+    logEntries.forEach((log) => {
+      transaction.set(doc(db, 'inventoryLogs', log.id), log);
     });
   });
 

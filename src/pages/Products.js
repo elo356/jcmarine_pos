@@ -18,9 +18,10 @@ import Modal from '../components/Modal';
 import Input from '../components/Input';
 import Select from '../components/Select';
 import Notification from '../components/Notification';
-import { saveProductsSnapshot, subscribeProducts } from '../services/inventoryService';
+import { addInventoryLog, saveProductsSnapshot, subscribeProducts } from '../services/inventoryService';
 import { normalizeHeader, parseCsv } from '../utils/csv';
 import { deleteCategory, saveCategory, subscribeCategories } from '../services/categoryService';
+import { buildInventoryLogEntry, INVENTORY_MOVEMENT_TYPES } from '../utils/inventoryLogUtils';
 import { useAuth } from '../contexts/AuthContext';
 import { auth } from '../firebase/config';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -42,7 +43,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [notification, setNotification] = useState(null);
-  const [linkedSearchQuery, setLinkedSearchQuery] = useState('');
   const [importingCsv, setImportingCsv] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [savingCategory, setSavingCategory] = useState(false);
@@ -62,7 +62,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   const barcodeIntervalRef = useRef(null);
   const PAGE_SIZE = 50;
   const debouncedSearchQuery = useDebouncedValue(searchQuery, 250);
-  const debouncedLinkedSearch = useDebouncedValue(linkedSearchQuery, 250);
   const isMobileDevice = useIsMobileDevice();
   const {
     hidSupported,
@@ -203,7 +202,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     if (pendingDraft?.productTemplate) {
       const template = pendingDraft.productTemplate;
       setEditingProduct(null);
-      setLinkedSearchQuery('');
       setFormData({
         sku: template.sku || '',
         alternateSkus: normalizeProductSkus(template.alternateSkus || template.skuReferences || template.crossReferences || []).join('\n'),
@@ -233,7 +231,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     if (!pendingDraft?.barcode) return;
 
     setEditingProduct(null);
-    setLinkedSearchQuery('');
     setFormData({
       sku: '',
       alternateSkus: '',
@@ -551,7 +548,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
   }, [applyScannedBarcode, isMobileDevice, refreshDevices, scannerReady, showBarcodeScannerModal]);
 
   const openModal = (product = null) => {
-    setLinkedSearchQuery('');
     if (product) {
       setEditingProduct(product);
       setFormData({
@@ -606,7 +602,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
   const resetProductForm = () => {
     setEditingProduct(null);
-    setLinkedSearchQuery('');
     setFormData({
       sku: '',
       alternateSkus: '',
@@ -701,12 +696,22 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     });
   };
 
-  const syncProductsInBackground = (nextProducts, successMessage, errorMessage, deletedIds = [], options = {}) => {
+  const syncProductsInBackground = (
+    nextProducts,
+    successMessage,
+    errorMessage,
+    deletedIds = [],
+    options = {},
+    inventoryLogEntries = []
+  ) => {
     const localData = loadData();
     try {
       saveData({
         ...localData,
-        products: nextProducts
+        products: nextProducts,
+        inventoryLogs: inventoryLogEntries.length > 0
+          ? [...inventoryLogEntries, ...(localData.inventoryLogs || [])]
+          : localData.inventoryLogs
       });
     } catch (error) {
       console.error(error);
@@ -718,7 +723,14 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     closeProductModal(true);
 
     saveProductsSnapshot(nextProducts, deletedIds, options)
-      .then(() => {
+      .then(async () => {
+        if (inventoryLogEntries.length > 0) {
+          try {
+            await Promise.all(inventoryLogEntries.map((log) => addInventoryLog(log)));
+          } catch (logError) {
+            console.error('Error saving inventory log entries:', logError);
+          }
+        }
         showNotification('success', successMessage);
       })
       .catch((error) => {
@@ -834,10 +846,31 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         return { ...product, linkedProductIds: [...nextLinks] };
       });
 
+      const stockChanged = computedStock !== editingProduct.stock;
+      const inventoryLogEntries = stockChanged
+        ? [buildInventoryLogEntry({
+            id: generateId('invlog'),
+            productId: editingProduct.id,
+            productName: formData.name,
+            type: computedStock > editingProduct.stock
+              ? INVENTORY_MOVEMENT_TYPES.adjustmentIn
+              : INVENTORY_MOVEMENT_TYPES.adjustmentOut,
+            quantity: Math.abs(computedStock - editingProduct.stock),
+            oldStock: editingProduct.stock,
+            newStock: computedStock,
+            reason: 'Edicion de producto',
+            performedBy: profile?.name || 'Sistema',
+            performedById: profile?.uid || ''
+          })]
+        : [];
+
       syncProductsInBackground(
         updatedProducts,
         'Producto actualizado exitosamente',
-        'Producto actualizado, pero no se pudo sincronizar con Firestore'
+        'Producto actualizado, pero no se pudo sincronizar con Firestore',
+        [],
+        {},
+        inventoryLogEntries
       );
       return;
     } else {
@@ -882,10 +915,28 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         return { ...product, linkedProductIds: [...nextLinks] };
       });
 
+      const inventoryLogEntries = computedStock > 0
+        ? [buildInventoryLogEntry({
+            id: generateId('invlog'),
+            productId: newProductId,
+            productName: formData.name,
+            type: INVENTORY_MOVEMENT_TYPES.adjustmentIn,
+            quantity: computedStock,
+            oldStock: 0,
+            newStock: computedStock,
+            reason: 'Producto nuevo',
+            performedBy: profile?.name || 'Sistema',
+            performedById: profile?.uid || ''
+          })]
+        : [];
+
       syncProductsInBackground(
         updatedProducts,
         'Producto creado exitosamente',
-        'Producto creado, pero no se pudo sincronizar con Firestore'
+        'Producto creado, pero no se pudo sincronizar con Firestore',
+        [],
+        {},
+        inventoryLogEntries
       );
       return;
     }
@@ -1136,6 +1187,7 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
 
       let created = 0;
       let updated = 0;
+      const csvInventoryLogEntries = [];
 
       dataRows.forEach((row) => {
         const skuRaw = col.sku >= 0 ? row[col.sku] : '';
@@ -1192,8 +1244,25 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         };
 
         if (matched) {
+          const oldStock = matched.stock;
           Object.assign(matched, payload);
           updated += 1;
+          if (payload.stock !== oldStock) {
+            csvInventoryLogEntries.push(buildInventoryLogEntry({
+              id: generateId('invlog'),
+              productId: matched.id,
+              productName: matched.name,
+              type: payload.stock > oldStock
+                ? INVENTORY_MOVEMENT_TYPES.adjustmentIn
+                : INVENTORY_MOVEMENT_TYPES.adjustmentOut,
+              quantity: Math.abs(payload.stock - oldStock),
+              oldStock,
+              newStock: payload.stock,
+              reason: 'Importacion CSV',
+              performedBy: profile?.name || 'Sistema',
+              performedById: profile?.uid || ''
+            }));
+          }
         } else {
           const id = generateId('prod');
           const newProduct = { id, ...payload };
@@ -1201,12 +1270,39 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
           getProductSkuReferences(newProduct).forEach((sku) => bySku.set(sku, newProduct));
           getProductBarcodes(newProduct).forEach((barcode) => byBarcode.set(barcode, newProduct));
           created += 1;
+          if (payload.stock > 0) {
+            csvInventoryLogEntries.push(buildInventoryLogEntry({
+              id: generateId('invlog'),
+              productId: id,
+              productName: newProduct.name,
+              type: INVENTORY_MOVEMENT_TYPES.adjustmentIn,
+              quantity: payload.stock,
+              oldStock: 0,
+              newStock: payload.stock,
+              reason: 'Importacion CSV (producto nuevo)',
+              performedBy: profile?.name || 'Sistema',
+              performedById: profile?.uid || ''
+            }));
+          }
         }
       });
 
       await saveProductsSnapshot(currentProducts);
+      if (csvInventoryLogEntries.length > 0) {
+        try {
+          await Promise.all(csvInventoryLogEntries.map((log) => addInventoryLog(log)));
+        } catch (logError) {
+          console.error('Error saving inventory log entries from CSV import:', logError);
+        }
+      }
       const localData = loadData();
-      saveData({ ...localData, products: currentProducts });
+      saveData({
+        ...localData,
+        products: currentProducts,
+        inventoryLogs: csvInventoryLogEntries.length > 0
+          ? [...csvInventoryLogEntries, ...(localData.inventoryLogs || [])]
+          : localData.inventoryLogs
+      });
       setProducts(currentProducts);
       showNotification(
         'success',
@@ -1774,61 +1870,6 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
               </div>
             </div>
 
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Productos conectados (aparecen en búsquedas relacionadas)
-              </label>
-              <div className="relative mb-2">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  value={linkedSearchQuery}
-                  onChange={(e) => setLinkedSearchQuery(e.target.value)}
-                  placeholder="Buscar por nombre, SKU o código..."
-                  className="input w-full pl-9"
-                />
-              </div>
-              <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-3 space-y-2">
-                {products
-                  .filter((product) => !editingProduct || product.id !== editingProduct.id)
-                  .filter((product) => {
-                    const query = debouncedLinkedSearch.trim().toLowerCase();
-                    if (!query) return true;
-                    return (
-                      (product.sku || '').toLowerCase().includes(query) ||
-                      product.name.toLowerCase().includes(query) ||
-                      getProductBarcodes(product).some((barcode) => barcode.includes(debouncedLinkedSearch)) ||
-                      (product.description || '').toLowerCase().includes(query)
-                    );
-                  })
-                  .slice(0, debouncedLinkedSearch.trim() ? 400 : 120)
-                  .map((product) => {
-                    const checked = formData.linkedProductIds.includes(product.id);
-                    return (
-                      <label key={product.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            const nextIds = e.target.checked
-                              ? [...formData.linkedProductIds, product.id]
-                              : formData.linkedProductIds.filter((id) => id !== product.id);
-                            setFormData({ ...formData, linkedProductIds: nextIds });
-                          }}
-                          className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                        />
-                        <span>
-                          {product.name} <span className="text-gray-500">({product.sku || '-'})</span>
-                        </span>
-                      </label>
-                    );
-                  })}
-                {products.length === 0 && (
-                  <p className="text-sm text-gray-500">No hay otros productos para conectar.</p>
-                )}
-              </div>
-            </div>
-            
             <div className="md:col-span-2">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input

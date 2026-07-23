@@ -23,12 +23,42 @@ const normalizeWeeklyShiftSettings = (settings = {}) => ({
   closeTime: /^\d{2}:\d{2}$/.test(String(settings.closeTime || '')) ? String(settings.closeTime) : DEFAULT_CLOSE_TIME
 });
 
+const getCycleStartForDate = (date) => {
+  const cycleStart = new Date(date);
+  cycleStart.setHours(0, 0, 0, 0);
+  cycleStart.setDate(cycleStart.getDate() - cycleStart.getDay());
+  return cycleStart;
+};
+
+const getCloseDateForCycleStart = (cycleStart, settings) => {
+  const closeDate = new Date(cycleStart);
+  const closeMinutes = getCloseMinutes(settings.closeTime);
+  closeDate.setDate(closeDate.getDate() + settings.closeDay);
+  closeDate.setHours(Math.floor(closeMinutes / 60), closeMinutes % 60, 0, 0);
+  return closeDate;
+};
+
+const getLatestCompletedWeeklyClose = (referenceDate = new Date(), weeklyShiftSettings = {}) => {
+  const now = toDate(referenceDate) || new Date();
+  const settings = normalizeWeeklyShiftSettings(weeklyShiftSettings);
+  const currentCycleStart = getCycleStartForDate(now);
+  const currentCycleClose = getCloseDateForCycleStart(currentCycleStart, settings);
+  const targetCycleStart = now >= currentCycleClose
+    ? currentCycleStart
+    : new Date(currentCycleStart.getTime() - (7 * 24 * 60 * 60 * 1000));
+  const closeAt = getCloseDateForCycleStart(targetCycleStart, settings);
+
+  return {
+    cycleStart: targetCycleStart,
+    cycleKey: targetCycleStart.toISOString().slice(0, 10),
+    closeAt
+  };
+};
+
 export const getWeeklyShiftCycleWindow = (referenceDate = new Date(), weeklyShiftSettings = {}) => {
   const now = toDate(referenceDate) || new Date();
   const settings = normalizeWeeklyShiftSettings(weeklyShiftSettings);
-  const cycleStart = new Date(now);
-  cycleStart.setHours(0, 0, 0, 0);
-  cycleStart.setDate(cycleStart.getDate() - cycleStart.getDay());
+  const cycleStart = getCycleStartForDate(now);
 
   const cycleEnd = new Date(cycleStart);
   cycleEnd.setDate(cycleEnd.getDate() + 6);
@@ -179,8 +209,8 @@ export const getAutomaticWeeklyClosuresToCreate = ({
   referenceDate = new Date(),
   weeklyShiftSettings = {}
 }) => {
-  const cycle = getWeeklyShiftCycleWindow(referenceDate, weeklyShiftSettings);
-  if (!cycle.isCloseDue) return [];
+  const latestCompletedClose = getLatestCompletedWeeklyClose(referenceDate, weeklyShiftSettings);
+  const closedAt = latestCompletedClose.closeAt;
 
   return employees
     .filter((employee) => employee?.id)
@@ -190,27 +220,30 @@ export const getAutomaticWeeklyClosuresToCreate = ({
         shifts,
         closures,
         sales,
-        referenceDate
+        referenceDate: closedAt,
+        weeklyShiftSettings
       });
 
-      const existingAutoClosure = closures.find((closure) => (
+      const existingClosure = closures.find((closure) => (
         closure.employeeId === employee.id
-        && closure.cycleKey === stats.cycleKey
-        && closure.mode === 'auto'
+        && closure.cycleKey === latestCompletedClose.cycleKey
       ));
 
-      if (existingAutoClosure) return null;
+      if (existingClosure) return null;
       if ((stats.totalHours || 0) <= 0 && (stats.totalEarned || 0) <= 0 && (stats.totalSales || 0) <= 0) {
         return null;
       }
 
       return buildWeeklyShiftClosureRecord({
         employee,
-        stats,
+        stats: {
+          ...stats,
+          cycleKey: latestCompletedClose.cycleKey
+        },
         closedBy,
         mode: 'auto',
-        closedAt: referenceDate,
-        id: `weekly_shift_auto_${employee.id}_${stats.cycleKey}`
+        closedAt,
+        id: `weekly_shift_auto_${employee.id}_${latestCompletedClose.cycleKey}`
       });
     })
     .filter(Boolean);

@@ -1,13 +1,14 @@
 import {
   collection,
   doc,
-  getDoc,
   getDocs,
+  increment,
   onSnapshot,
   orderBy,
   query,
   setDoc,
   updateDoc,
+  where,
   writeBatch
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
@@ -100,36 +101,14 @@ export const saveProductsSnapshot = async (products, deletedIds = [], options = 
   }
 };
 
-export const updateProductStock = async (productId, newStock) => {
+// Usa increment() para que el ajuste sea atomico en Firestore: dos ajustes concurrentes
+// (o un ajuste manual junto a una venta) se suman en vez de que uno sobrescriba al otro
+// con un valor de stock ya obsoleto.
+export const applyProductStockDelta = async (productId, delta) => {
   await updateDoc(doc(db, 'products', productId), {
-    stock: newStock,
+    stock: increment(delta),
     updatedAt: new Date().toISOString()
   });
-};
-
-export const decrementStockForSale = async (cartItems) => {
-  const updates = await Promise.all(
-    cartItems.map(async (item) => {
-      const productRef = doc(db, 'products', item.id);
-      const snap = await getDoc(productRef);
-      if (!snap.exists()) return null;
-
-      const product = snap.data();
-      const currentStock = Number(product.stock || 0);
-      const nextStock = Math.max(0, currentStock - Number(item.quantity || 0));
-      return { productRef, nextStock };
-    })
-  );
-
-  const batch = writeBatch(db);
-  updates.filter(Boolean).forEach(({ productRef, nextStock }) => {
-    batch.update(productRef, {
-      stock: nextStock,
-      updatedAt: new Date().toISOString()
-    });
-  });
-
-  await batch.commit();
 };
 
 export const listInventoryLogs = async () => {
@@ -151,4 +130,23 @@ export const subscribeInventoryLogs = (onData, onError) => {
 
 export const addInventoryLog = async (log) => {
   await setDoc(doc(db, 'inventoryLogs', log.id), log, { merge: true });
+};
+
+// Suscribe solo a los movimientos entre [startDate, endDate) en vez de traer toda la
+// coleccion, para que la bitacora del dia cargue rapido aunque el historial crezca.
+export const subscribeInventoryLogsInRange = (startDate, endDate, onData, onError) => {
+  const q = query(
+    logsCol,
+    where('date', '>=', startDate),
+    where('date', '<', endDate),
+    orderBy('date', 'desc')
+  );
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const rows = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      onData(rows);
+    },
+    onError
+  );
 };

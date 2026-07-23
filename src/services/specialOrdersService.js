@@ -1,5 +1,7 @@
 import { collection, doc, onSnapshot, orderBy, query, runTransaction, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
+import { generateId } from '../data/demoData';
+import { buildInventoryLogEntry, INVENTORY_MOVEMENT_TYPES } from '../utils/inventoryLogUtils';
 import { saveAuditLog } from './auditLogService';
 import { savePayment } from './paymentService';
 import { saveSale } from './salesService';
@@ -44,7 +46,8 @@ export const saveSpecialOrder = async (order) => {
 };
 
 // direction -1 descuenta stock (entrega), +1 lo devuelve (revertir entrega)
-export const adjustInventoryForSpecialOrderItems = async (items = [], direction = -1) => {
+export const adjustInventoryForSpecialOrderItems = async (items = [], direction = -1, context = {}) => {
+  const { orderId = '', performedBy = 'Sistema', performedById = '' } = context;
   const quantityByProduct = new Map();
   (items || []).forEach((item) => {
     const productId = item?.productId;
@@ -63,6 +66,8 @@ export const adjustInventoryForSpecialOrderItems = async (items = [], direction 
       })
     );
 
+    const logEntries = [];
+
     productSnapshots.forEach(({ productId, productRef, snapshot }) => {
       if (!snapshot.exists()) return;
       const product = snapshot.data();
@@ -73,6 +78,23 @@ export const adjustInventoryForSpecialOrderItems = async (items = [], direction 
         stock: nextStock,
         updatedAt: new Date().toISOString()
       });
+      logEntries.push(buildInventoryLogEntry({
+        id: generateId('invlog'),
+        productId,
+        productName: product.name || productId,
+        type: direction < 0 ? INVENTORY_MOVEMENT_TYPES.specialOrderDelivery : INVENTORY_MOVEMENT_TYPES.specialOrderRevert,
+        quantity,
+        oldStock: currentStock,
+        newStock: nextStock,
+        reason: direction < 0 ? `Entrega pedido especial ${orderId}` : `Reversion entrega pedido especial ${orderId}`,
+        performedBy,
+        performedById,
+        reference: orderId
+      }));
+    });
+
+    logEntries.forEach((log) => {
+      transaction.set(doc(db, 'inventoryLogs', log.id), log);
     });
   });
 };

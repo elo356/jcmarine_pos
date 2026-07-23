@@ -37,7 +37,7 @@ function SpecialOrderCancellationModal({
     });
     handleClose();
   };
-
+  
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title="Cancelar pedido" size="md">
       {order && (

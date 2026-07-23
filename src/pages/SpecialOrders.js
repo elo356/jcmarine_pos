@@ -230,7 +230,12 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
 
     if (!order.stockDeducted) {
       try {
-        await adjustInventoryForSpecialOrderItems(order.items, -1);
+        const currentUser = getCurrentUserIdentity(user, profile, loadData().currentUser);
+        await adjustInventoryForSpecialOrderItems(order.items, -1, {
+          orderId: order.id,
+          performedBy: currentUser.name,
+          performedById: currentUser.id
+        });
       } catch (error) {
         console.error('Error descontando inventario del pedido especial:', error);
         showNotification('error', 'No se pudo actualizar el inventario del pedido.');
@@ -252,7 +257,12 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
   const undoDeliveredOrder = async (order) => {
     if (order.stockDeducted) {
       try {
-        await adjustInventoryForSpecialOrderItems(order.items, 1);
+        const currentUser = getCurrentUserIdentity(user, profile, loadData().currentUser);
+        await adjustInventoryForSpecialOrderItems(order.items, 1, {
+          orderId: order.id,
+          performedBy: currentUser.name,
+          performedById: currentUser.id
+        });
       } catch (error) {
         console.error('Error restaurando inventario del pedido especial:', error);
         showNotification('error', 'No se pudo restaurar el inventario del pedido.');
@@ -410,6 +420,7 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
       }
     });
   };
+
 
   const handleCreateOrder = async ({ customer, items, depositAmount, depositMethod, expectedDate, internalNotes }) => {
     const currentUser = getCurrentUserIdentity(user, profile, loadData().currentUser);

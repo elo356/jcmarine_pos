@@ -1,5 +1,7 @@
 import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase/config';
+import { generateId } from '../data/demoData';
+import { buildInventoryLogEntry, INVENTORY_MOVEMENT_TYPES } from '../utils/inventoryLogUtils';
 
 const SHARED_POS_CART_COLLECTION = 'posCarts';
 const SHARED_POS_CART_ID = 'shared_active';
@@ -46,15 +48,20 @@ export const commitSaleTransaction = async ({
 
   const groupedCartItems = groupCartItemsByProduct(cartItems);
 
+  const performedBy = sale.chargedBy || sale.cashier || updatedBy?.name || 'Sistema';
+  const performedById = sale.chargedById || sale.cashierId || updatedBy?.uid || '';
+
   await runTransaction(db, async (transaction) => {
     const productUpdates = [];
+    const missingProductIds = [];
+    const logEntries = [];
 
     for (const [productId, quantity] of groupedCartItems.entries()) {
       const productRef = doc(db, 'products', productId);
       const productSnapshot = await transaction.get(productRef);
 
       if (!productSnapshot.exists()) {
-        console.warn(`Skipping Firestore stock update for missing product ${productId}.`);
+        missingProductIds.push(productId);
         continue;
       }
 
@@ -73,6 +80,28 @@ export const commitSaleTransaction = async ({
       }
 
       productUpdates.push({ productRef, payload });
+      logEntries.push(buildInventoryLogEntry({
+        id: generateId('invlog'),
+        productId,
+        productName: product.name || productId,
+        type: INVENTORY_MOVEMENT_TYPES.sale,
+        quantity,
+        oldStock: currentStock,
+        newStock: nextStock,
+        reason: `Venta ${sale.id}`,
+        performedBy,
+        performedById,
+        reference: sale.id
+      }));
+    }
+
+    if (missingProductIds.length > 0) {
+      const error = new Error(
+        `No se pudo completar la venta: ${missingProductIds.length} producto(s) del carrito ya no existen en el inventario (${missingProductIds.join(', ')}).`
+      );
+      error.code = 'missing-product';
+      error.missingProductIds = missingProductIds;
+      throw error;
     }
 
     transaction.set(doc(db, 'sales', sale.id), sale, { merge: true });
@@ -83,6 +112,10 @@ export const commitSaleTransaction = async ({
 
     productUpdates.forEach(({ productRef, payload }) => {
       transaction.update(productRef, payload);
+    });
+
+    logEntries.forEach((log) => {
+      transaction.set(doc(db, 'inventoryLogs', log.id), log);
     });
 
     transaction.set(

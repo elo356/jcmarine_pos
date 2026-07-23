@@ -48,7 +48,8 @@ service cloud.firestore {
     match /sales/{saleId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if isAdmin();
+      allow update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
     match /onlineOrders/{orderId} {
@@ -72,6 +73,12 @@ service cloud.firestore {
     match /roles/{roleId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isAdmin();
+    }
+
+    // Las notas eliminadas se conservan con deletedAt/expiresAt para permitir
+    // restaurarlas durante 10 dias desde la papelera.
+    match /notes/{noteId} {
+      allow read, create, update, delete: if isSignedIn();
     }
 
     match /posCarts/{cartId} {

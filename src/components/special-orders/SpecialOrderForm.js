@@ -4,7 +4,14 @@ import Modal from '../Modal';
 import Input from '../Input';
 import Select from '../Select';
 import CustomerLookupSection from './CustomerLookupSection';
-import { formatCurrency, formatQuantity, getPrimaryProductBarcode, getProductBarcodes, getProductSkuReferences } from '../../data/demoData';
+import {
+  formatCurrency,
+  formatQuantity,
+  getPrimaryProductBarcode,
+  getProductBarcodes,
+  getProductSkuReferences,
+  productMatchesBarcode
+} from '../../data/demoData';
 import { calculateItemPricing, IVU_MUNICIPAL_RATE, IVU_STATE_RATE, roundMoney } from '../../utils/cartPricing';
 import { PAYMENT_METHOD_OPTIONS } from '../../utils/paymentUtils';
 import { fileToTxt } from '../../utils/fileToTxt';
@@ -227,6 +234,38 @@ function SpecialOrderForm({
     });
   };
 
+  const handleProductSearchKeyDown = (event) => {
+    if (event.key !== 'Enter') return;
+
+    event.preventDefault();
+
+    const query = itemSearchQuery.trim();
+    if (!query) return;
+
+    const normalizedQuery = query.toLowerCase();
+    const exactBarcodeMatch = activeProducts.find((product) => productMatchesBarcode(product, query));
+    const exactSkuMatch = activeProducts.find((product) => [
+      product.sku || '',
+      ...getProductSkuReferences(product)
+    ].some((sku) => String(sku || '').trim().toLowerCase() === normalizedQuery));
+    const productToAdd = exactBarcodeMatch || exactSkuMatch || (filteredProducts.length === 1 ? filteredProducts[0] : null);
+
+    if (!productToAdd) return;
+
+    addProductToItems(productToAdd);
+    setItemSearchQuery('');
+    setErrors((current) => ({ ...current, items: undefined }));
+  };
+
+  const handleFormKeyDown = (event) => {
+    if (event.key !== 'Enter') return;
+
+    const tagName = event.target?.tagName?.toLowerCase();
+    if (tagName === 'input' || tagName === 'select') {
+      event.preventDefault();
+    }
+  };
+
   const updateItemQuantity = (index, delta) => {
     setItems((current) => {
       const nextItems = current.map((item, itemIndex) => {
@@ -296,7 +335,7 @@ function SpecialOrderForm({
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title={title} size="xl">
-      <form className="space-y-6" onSubmit={handleSubmit}>
+      <form className="space-y-6" onSubmit={handleSubmit} onKeyDown={handleFormKeyDown}>
         <CustomerLookupSection
           customers={customers}
           value={customer}
@@ -328,6 +367,7 @@ function SpecialOrderForm({
                   type="text"
                   value={itemSearchQuery}
                   onChange={(e) => setItemSearchQuery(e.target.value)}
+                  onKeyDown={handleProductSearchKeyDown}
                   className="input w-full pl-10"
                   placeholder="Buscar por nombre, SKU o código"
                 />

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Archive, CalendarDays, Clock, Save, ShieldCheck } from 'lucide-react';
+import { Archive, Clock, Save, ShieldCheck } from 'lucide-react';
 import Notification from '../components/Notification';
 import RolesPermissions from './RolesPermissions';
 import BackupSettings from '../components/BackupSettings';
@@ -8,9 +8,6 @@ import {
   saveSystemSettings,
   subscribeSystemSettings
 } from '../services/settingsService';
-import { getBackupState, isBackupDue, runBackup } from '../services/backupService';
-
-const DAY_LABELS = ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'];
 
 const DAY_OPTIONS = [
   { value: 0, label: 'Domingo' },
@@ -26,7 +23,6 @@ function SettingsPage() {
   const [activeSection, setActiveSection] = useState('weekly');
   const [settings, setSettings] = useState(DEFAULT_SYSTEM_SETTINGS);
   const [form, setForm] = useState(DEFAULT_SYSTEM_SETTINGS.weeklyShift);
-  const [hoursForm, setHoursForm] = useState(DEFAULT_SYSTEM_SETTINGS.storeHours);
   const [saving, setSaving] = useState(false);
   const [notification, setNotification] = useState(null);
   const [syncMeta, setSyncMeta] = useState({ fromCache: true, failed: false });
@@ -36,18 +32,7 @@ function SettingsPage() {
       (nextSettings, meta = {}) => {
         setSettings(nextSettings);
         setForm(nextSettings.weeklyShift);
-        setHoursForm(nextSettings.storeHours);
         setSyncMeta(meta);
-
-        // Auto-run backup if enabled and due (runs once after settings load from server)
-        if (!meta.fromCache && nextSettings.backup?.enabled) {
-          const { lastBackupAt, folder } = getBackupState();
-          if (isBackupDue(nextSettings.backup.intervalDays, lastBackupAt)) {
-            runBackup(folder).catch((err) =>
-              console.error('[backup] Auto-backup failed:', err)
-            );
-          }
-        }
       },
       (error) => console.error('Error loading system settings:', error)
     );
@@ -79,19 +64,6 @@ function SettingsPage() {
         weeklyShift: { closeDay: Number(form.closeDay), closeTime: form.closeTime },
       });
       showNotification('success', 'Configuracion semanal guardada.');
-    } catch (error) {
-      console.error(error);
-      showNotification('warning', 'Se guardo localmente, pero no se pudo sincronizar con Firestore.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSaveStoreHours = async () => {
-    setSaving(true);
-    try {
-      await saveSystemSettings({ ...settings, storeHours: hoursForm });
-      showNotification('success', 'Horario de la tienda guardado.');
     } catch (error) {
       console.error(error);
       showNotification('warning', 'Se guardo localmente, pero no se pudo sincronizar con Firestore.');
@@ -153,14 +125,6 @@ function SettingsPage() {
         </button>
         <button
           type="button"
-          onClick={() => setActiveSection('storeHours')}
-          className={`btn ${activeSection === 'storeHours' ? 'btn-primary' : 'btn-secondary'}`}
-        >
-          <CalendarDays size={18} />
-          Horario de tienda
-        </button>
-        <button
-          type="button"
           onClick={() => setActiveSection('backup')}
           className={`btn ${activeSection === 'backup' ? 'btn-primary' : 'btn-secondary'}`}
         >
@@ -177,102 +141,7 @@ function SettingsPage() {
         </button>
       </div>
 
-      {activeSection === 'storeHours' ? (
-        <div className="card p-6 space-y-6">
-          <div>
-            <h2 className="text-xl font-semibold text-gray-900">Horario de la tienda</h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Configure los dias y horas de operacion para cada dia de la semana.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            {DAY_LABELS.map((label, day) => {
-              const h = hoursForm[day];
-              return (
-                <div
-                  key={day}
-                  className={`flex flex-wrap items-center gap-x-4 gap-y-3 rounded-lg border px-4 py-3 transition-colors ${
-                    h.open ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'
-                  }`}
-                >
-                  <span className="w-24 text-sm font-medium text-gray-700">{label}</span>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={h.open}
-                      onClick={() =>
-                        setHoursForm((prev) => ({
-                          ...prev,
-                          [day]: { ...prev[day], open: !prev[day].open },
-                        }))
-                      }
-                      className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 ${
-                        h.open ? 'bg-blue-600' : 'bg-gray-300'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                          h.open ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                    <span className={`w-14 text-sm ${h.open ? 'text-gray-700' : 'text-gray-400'}`}>
-                      {h.open ? 'Abierto' : 'Cerrado'}
-                    </span>
-                  </div>
-
-                  <div className={`flex flex-wrap items-center gap-3 ${!h.open ? 'pointer-events-none opacity-40' : ''}`}>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">Apertura</span>
-                      <input
-                        type="time"
-                        value={h.openTime}
-                        onChange={(e) =>
-                          setHoursForm((prev) => ({
-                            ...prev,
-                            [day]: { ...prev[day], openTime: e.target.value },
-                          }))
-                        }
-                        className="input"
-                      />
-                    </div>
-                    <span className="text-gray-400">—</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">Cierre</span>
-                      <input
-                        type="time"
-                        value={h.closeTime}
-                        onChange={(e) =>
-                          setHoursForm((prev) => ({
-                            ...prev,
-                            [day]: { ...prev[day], closeTime: e.target.value },
-                          }))
-                        }
-                        className="input"
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={handleSaveStoreHours}
-              className="btn btn-primary"
-              disabled={saving}
-            >
-              <Save size={18} />
-              {saving ? 'Guardando...' : 'Guardar horario'}
-            </button>
-          </div>
-        </div>
-      ) : activeSection === 'backup' ? (
+      {activeSection === 'backup' ? (
         <div className="card p-6 space-y-6">
           <BackupSettings
             backup={settings.backup}

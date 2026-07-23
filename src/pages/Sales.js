@@ -15,6 +15,7 @@ import {
 } from '../data/demoData';
 import { subscribeProducts } from '../services/inventoryService';
 import { refundSale, registerSaleExchange, resetAllSaleExchangesSync, saveSale, subscribeSales } from '../services/salesService';
+import { queuePendingExchange, queuePendingRefund, syncPendingQueue } from '../services/pendingSyncService';
 import { subscribeSpecialOrders } from '../services/specialOrdersService';
 import { syncWeeklySalesCache, upsertWeeklyCachedSale } from '../services/weeklySalesCacheService';
 import { buildPaymentEntry, getPaymentMethodLabel, normalizePaymentMethod } from '../utils/paymentUtils';
@@ -36,20 +37,20 @@ import { useAuth } from '../contexts/AuthContext';
 import { buildSalePrintHtml, buildSaleRefundPrintHtml, buildSpecialOrderPrintHtml } from '../utils/printTemplates';
 import { printHtmlDocument } from '../services/printService';
 import { calculateItemPricing, roundMoney } from '../utils/cartPricing';
+import { buildInventoryLogEntry, INVENTORY_MOVEMENT_TYPES } from '../utils/inventoryLogUtils';
 
 const DEFAULT_REFUND_FORM = {
-  amount: '',
   method: '',
   reason: '',
   notes: '',
-  saleItemKey: '',
-  quantity: 1
+  mode: 'items',
+  itemQuantities: {}
 };
 
 const DEFAULT_EXCHANGE_FORM = {
   returnedItemKey: '',
-  replacementProductId: '',
-  replacementSize: '',
+  returnedQuantity: 1,
+  replacementItems: [],
   settlementMethod: 'cash',
   settlementReference: '',
   notes: ''
@@ -320,31 +321,18 @@ function Sales() {
       })
       .filter((entry) => entry && entry.availableToRefund > 0);
   }, [refundTarget, specialOrders]);
-  const selectedRefundItem = useMemo(
-    () => refundItemOptions.find((entry) => entry.saleItemKey === refundForm.saleItemKey) || null,
-    [refundForm.saleItemKey, refundItemOptions]
+  const selectedRefundItems = useMemo(() => refundItemOptions
+    .map((option) => {
+      const requestedQuantity = Number(refundForm.itemQuantities?.[option.saleItemKey] || 0);
+      const quantity = Math.min(Math.max(0, requestedQuantity), Number(option.availableToRefund || 0));
+
+      return quantity > 0 ? { ...option, quantity, amount: roundMoney(quantity * option.unitAmount) } : null;
+    })
+    .filter(Boolean), [refundForm.itemQuantities, refundItemOptions]);
+  const selectedRefundItemsAmount = useMemo(
+    () => roundMoney(selectedRefundItems.reduce((sum, item) => sum + item.amount, 0)),
+    [selectedRefundItems]
   );
-  useEffect(() => {
-    if (!refundTarget || !selectedRefundItem) return;
-
-    const quantity = Math.min(
-      Math.max(1, Number(refundForm.quantity || 1)),
-      Number(selectedRefundItem.availableToRefund || 1)
-    );
-    const amount = roundMoney(quantity * Number(selectedRefundItem.unitAmount || 0));
-
-    setRefundForm((current) => {
-      if (Number(current.quantity || 1) === quantity && Number(current.amount || 0) === amount) {
-        return current;
-      }
-
-      return {
-        ...current,
-        quantity,
-        amount: amount > 0 ? amount.toFixed(2) : ''
-      };
-    });
-  }, [refundForm.quantity, refundTarget, selectedRefundItem]);
   const exchangeReturnedOptions = useMemo(() => {
     if (!exchangeTarget) return [];
 
@@ -374,10 +362,12 @@ function Sales() {
     () => exchangeReturnedOptions.find((entry) => entry.saleItemKey === exchangeForm.returnedItemKey) || null,
     [exchangeForm.returnedItemKey, exchangeReturnedOptions]
   );
-  const replacementProduct = useMemo(
-    () => products.find((product) => product.id === exchangeForm.replacementProductId) || null,
-    [exchangeForm.replacementProductId, products]
-  );
+  const replacementItems = useMemo(() => exchangeForm.replacementItems
+    .map((item) => ({ ...item, product: products.find((product) => product.id === item.productId) || null }))
+    .filter((item) => item.product), [exchangeForm.replacementItems, products]);
+  // Alias used only by the legacy single-item controls below while old exchange data is displayed.
+  const replacementProduct = replacementItems[0]?.product || null;
+  const replacementSize = exchangeForm.replacementSize || '';
   const filteredReplacementProducts = useMemo(() => {
     const query = exchangeReplacementSearch.trim().toLowerCase();
     if (!query) return products;
@@ -399,28 +389,32 @@ function Sales() {
       return searchableText.includes(query);
     });
   }, [exchangeReplacementSearch, products]);
-  const replacementSizeOptions = useMemo(() => {
-    if (!replacementProduct?.useSizeSelection) return [];
-    if (Array.isArray(replacementProduct.sizeStocks) && replacementProduct.sizeStocks.length > 0) {
-      return replacementProduct.sizeStocks.map((entry) => entry.size).filter(Boolean);
+  const replacementSizeOptions = (product) => {
+    if (!product?.useSizeSelection) return [];
+    if (Array.isArray(product.sizeStocks) && product.sizeStocks.length > 0) {
+      return product.sizeStocks.map((entry) => entry.size).filter(Boolean);
     }
-    return Array.isArray(replacementProduct.availableSizes) ? replacementProduct.availableSizes.filter(Boolean) : [];
-  }, [replacementProduct]);
-  const replacementSize = replacementProduct?.useSizeSelection ? exchangeForm.replacementSize : '';
-  const replacementPricing = useMemo(() => {
-    if (!replacementProduct) return null;
-
-    return calculateItemPricing({
-      quantity: 1,
-      price: Number(replacementProduct.price || 0),
-      ivuStateEnabled: replacementProduct.ivuStateEnabled !== false,
-      ivuMunicipalEnabled: replacementProduct.ivuMunicipalEnabled !== false
-    });
-  }, [replacementProduct]);
+    return Array.isArray(product.availableSizes) ? product.availableSizes.filter(Boolean) : [];
+  };
+  const replacementPricings = useMemo(() => replacementItems.map((item) => ({
+    ...item,
+    quantity: Math.max(1, Number(item.quantity) || 1),
+    pricing: calculateItemPricing({
+      quantity: Math.max(1, Number(item.quantity) || 1),
+      price: Number(item.product.price || 0),
+      ivuStateEnabled: item.product.ivuStateEnabled !== false,
+      ivuMunicipalEnabled: item.product.ivuMunicipalEnabled !== false
+    })
+  })), [replacementItems]);
+  const replacementPricing = replacementPricings[0]?.pricing || null;
+  const exchangeReturnedQuantity = useMemo(() => Math.min(
+    Math.max(1, Number(exchangeForm.returnedQuantity) || 1),
+    Number(selectedReturnedOption?.availableToExchange || 0)
+  ), [exchangeForm.returnedQuantity, selectedReturnedOption]);
   const exchangeDifference = useMemo(() => {
-    if (!selectedReturnedOption || !replacementPricing) return 0;
-    return roundMoney(replacementPricing.total - selectedReturnedOption.unitTotal);
-  }, [replacementPricing, selectedReturnedOption]);
+    const replacementTotal = replacementPricings.reduce((sum, item) => sum + item.pricing.total, 0);
+    return roundMoney(replacementTotal - ((selectedReturnedOption?.unitTotal || 0) * exchangeReturnedQuantity));
+  }, [exchangeReturnedQuantity, replacementPricings, selectedReturnedOption]);
   useEffect(() => {
     if (!exchangeTarget) {
       setExchangeReplacementSearch('');
@@ -500,18 +494,13 @@ function Sales() {
   };
 
   const openRefundModal = (sale) => {
-    const remaining = Math.max(0, Number(sale.total || 0) - getSaleRefundTotal(sale));
-    const firstRefundableItem = (sale.items || [])
-      .map((item, index) => ({ item, saleItemKey: getSaleItemKey(sale.id, item, index) }))
-      .find((entry) => entry.item.isSpecialOrderPayment !== true);
     setRefundTarget(sale);
     setRefundForm({
-      amount: remaining > 0 ? remaining.toFixed(2) : '',
       method: normalizePaymentMethod(sale.paymentMethod) || 'cash',
       reason: '',
       notes: '',
-      saleItemKey: firstRefundableItem?.saleItemKey || '',
-      quantity: 1
+      mode: 'items',
+      itemQuantities: {}
     });
   };
 
@@ -596,7 +585,7 @@ function Sales() {
       exchangeSales.forEach((sale) => {
         (sale.exchanges || []).forEach((exchange) => {
           const returnedProductId = exchange.returnedItem?.productId;
-          const replacementProductId = exchange.replacementItem?.productId;
+          const replacementItems = exchange.replacementItems || (exchange.replacementItem ? [exchange.replacementItem] : []);
 
           if (returnedProductId && nextProductsMap.has(returnedProductId)) {
             nextProductsMap.set(
@@ -609,16 +598,14 @@ function Sales() {
             );
           }
 
-          if (replacementProductId && nextProductsMap.has(replacementProductId)) {
-            nextProductsMap.set(
-              replacementProductId,
-              applyLocalStockChange(
-                nextProductsMap.get(replacementProductId),
-                exchange.replacementItem?.selectedSize || '',
-                Number(exchange.replacementItem?.quantity || 1)
-              )
-            );
-          }
+          replacementItems.forEach((replacementItem) => {
+            if (!replacementItem?.productId || !nextProductsMap.has(replacementItem.productId)) return;
+            nextProductsMap.set(replacementItem.productId, applyLocalStockChange(
+              nextProductsMap.get(replacementItem.productId),
+              replacementItem.selectedSize || '',
+              Number(replacementItem.quantity || 1)
+            ));
+          });
         });
       });
 
@@ -690,22 +677,23 @@ function Sales() {
   const handleRefund = async () => {
     if (!refundTarget) return;
 
-    const refundQuantity = selectedRefundItem
-      ? Math.min(
-          Math.max(1, Number(refundForm.quantity || 1)),
-          Number(selectedRefundItem.availableToRefund || 1)
-        )
-      : 1;
-    const refundAmount = roundMoney(Number(refundForm.amount || 0));
     const maxRefund = Math.max(0, Number(refundTarget.total || 0) - getSaleRefundTotal(refundTarget));
-
-    if (selectedRefundItem && (refundQuantity <= 0 || refundQuantity > Number(selectedRefundItem.availableToRefund || 0))) {
-      showNotification('error', 'La cantidad a reembolsar no esta disponible para ese producto.');
-      return;
-    }
+    const isFullRefund = refundForm.mode === 'total';
+    const refundEntries = isFullRefund
+      ? refundItemOptions.map((item) => ({
+        ...item,
+        quantity: Number(item.availableToRefund || 0),
+        amount: roundMoney(Number(item.availableToRefund || 0) * Number(item.unitAmount || 0))
+      })).filter((item) => item.quantity > 0)
+      : selectedRefundItems;
+    const refundAmount = isFullRefund
+      ? maxRefund
+      : roundMoney(refundEntries.reduce((sum, item) => sum + item.amount, 0));
 
     if (refundAmount <= 0) {
-      showNotification('error', 'Indica un monto válido para reembolsar.');
+      showNotification('error', isFullRefund
+        ? 'No queda balance disponible para reembolsar.'
+        : 'Selecciona al menos un artículo y su cantidad.');
       return;
     }
 
@@ -719,17 +707,15 @@ function Sales() {
       method: refundForm.method || normalizePaymentMethod(refundTarget.paymentMethod) || 'cash',
       reason: refundForm.reason,
       notes: refundForm.notes,
-      items: selectedRefundItem ? [
-        {
-          saleItemKey: selectedRefundItem.saleItemKey,
-          productId: selectedRefundItem.item.productId || selectedRefundItem.item.sourceSpecialOrderItemId || '',
-          name: selectedRefundItem.item.name,
-          selectedSize: selectedRefundItem.item.selectedSize || '',
-          quantity: refundQuantity,
-          unitAmount: refundQuantity > 0 ? roundMoney(refundAmount / refundQuantity) : selectedRefundItem.unitAmount,
-          amount: refundAmount
-        }
-      ] : [],
+      items: refundEntries.map((entry) => ({
+        saleItemKey: entry.saleItemKey,
+        productId: entry.item.productId || entry.item.sourceSpecialOrderItemId || '',
+        name: entry.item.name,
+        selectedSize: entry.item.selectedSize || '',
+        quantity: entry.quantity,
+        unitAmount: entry.unitAmount,
+        amount: entry.amount
+      })),
       refundedBy: profile?.name || user?.email || 'Sistema',
       refundedAt: new Date().toISOString()
     });
@@ -770,13 +756,22 @@ function Sales() {
       const persistedSale = await refundSale(targetSale, refundRecord);
       setRefundTarget(null);
       setRefundForm(DEFAULT_REFUND_FORM);
-      showNotification('success', refundAmount >= Number(targetSale.total || 0)
+      showNotification('success', refundAmount >= maxRefund
         ? 'Venta reembolsada completamente.'
         : 'Reembolso parcial registrado.');
       await handlePrintRefundReceipt(persistedSale, refundRecord);
     } catch (error) {
       console.error('Error refunding sale:', error);
-      showNotification('error', 'El reembolso se guardó localmente, pero falló la sincronización.');
+      queuePendingRefund({ sale: targetSale, refundRecord });
+      syncPendingQueue().catch((syncError) => {
+        console.error('Error retrying pending sync queue:', syncError);
+      });
+      setRefundTarget(null);
+      setRefundForm(DEFAULT_REFUND_FORM);
+      showNotification(
+        'warning',
+        'Reembolso guardado. No se pudo confirmar con el servidor todavia; se reintentara sincronizar el inventario automaticamente.'
+      );
     }
   };
 
@@ -789,20 +784,26 @@ function Sales() {
       return;
     }
 
-    if (!replacementProduct) {
-      showNotification('error', 'Selecciona la pieza nueva que el cliente se va a llevar.');
+    if (replacementItems.length === 0) {
+      showNotification('error', 'Agrega al menos una pieza nueva para el cambio.');
       return;
     }
 
-    if (replacementProduct.useSizeSelection && !replacementSize) {
-      showNotification('error', 'Selecciona la talla o size de la pieza nueva.');
+    const returnedQuantity = Math.max(1, Math.floor(Number(exchangeForm.returnedQuantity) || 0));
+    if (returnedQuantity > Number(returnedOption.availableToExchange || 0)) {
+      showNotification('error', `Solo puedes recibir hasta ${returnedOption.availableToExchange} pieza(s) de esa venta.`);
       return;
     }
 
-    const replacementStock = getProductStockForExchange(replacementProduct, replacementSize);
-    if (replacementStock < 1) {
-      showNotification('error', 'La pieza nueva no tiene stock disponible para hacer el cambio.');
-      return;
+    const requestedReplacementItems = replacementItems.map((item) => ({
+      ...item,
+      quantity: Math.max(1, Math.floor(Number(item.quantity) || 0))
+    }));
+    for (const item of requestedReplacementItems) {
+      if (item.product.useSizeSelection && !item.selectedSize) {
+        showNotification('error', `Selecciona la talla o size de ${item.product.name}.`);
+        return;
+      }
     }
 
     const currentData = loadData();
@@ -818,27 +819,35 @@ function Sales() {
       return;
     }
 
+    if (!originalSaleItem.productId) {
+      showNotification('error', 'La pieza devuelta no tiene producto de inventario asociado.');
+      return;
+    }
+
     const currentExchangedCount = (originalSale.exchanges || []).reduce((sum, exchange) => (
       exchange.returnedItem?.saleItemKey === returnedOption.saleItemKey
         ? sum + Number(exchange.returnedItem?.quantity || 0)
         : sum
     ), 0);
 
-    if (currentExchangedCount >= Number(originalSaleItem.quantity || 0)) {
-      showNotification('error', 'Esa pieza ya fue cambiada completamente.');
+    const availableToExchange = Math.max(0, Number(originalSaleItem.quantity || 0) - currentExchangedCount);
+    if (returnedQuantity > availableToExchange) {
+      showNotification('error', `Solo quedan ${availableToExchange} pieza(s) de esa venta disponibles para cambio.`);
       return;
     }
 
-    const liveReplacementProduct = (currentData.products || []).find((product) => product.id === replacementProduct.id);
-    if (!liveReplacementProduct) {
-      showNotification('error', 'No se encontro la pieza nueva en inventario.');
-      return;
-    }
-
-    const liveReplacementStock = getProductStockForExchange(liveReplacementProduct, replacementSize);
-    if (liveReplacementStock < 1) {
-      showNotification('error', 'La pieza nueva se quedo sin stock. Actualiza e intenta otra vez.');
-      return;
+    const requestedByInventorySlot = requestedReplacementItems.reduce((map, item) => {
+      const key = `${item.productId}::${item.selectedSize || ''}`;
+      map.set(key, (map.get(key) || 0) + item.quantity);
+      return map;
+    }, new Map());
+    for (const item of requestedReplacementItems) {
+      const liveProduct = (currentData.products || []).find((product) => product.id === item.productId);
+      const requested = requestedByInventorySlot.get(`${item.productId}::${item.selectedSize || ''}`);
+      if (!liveProduct || getProductStockForExchange(liveProduct, item.selectedSize) < requested) {
+        showNotification('error', `No hay stock suficiente para entregar ${item.product.name}.`);
+        return;
+      }
     }
 
     const returnedFinancials = getSaleItemFinancials(originalSaleItem);
@@ -849,13 +858,27 @@ function Sales() {
     const returnedUnitStateTax = roundMoney(returnedFinancials.taxBreakdown.state / returnedUnitQuantity);
     const returnedUnitMunicipalTax = roundMoney(returnedFinancials.taxBreakdown.municipal / returnedUnitQuantity);
     const returnedUnitTotal = roundMoney(returnedFinancials.total / returnedUnitQuantity);
-    const nextReplacementPricing = calculateItemPricing({
-      quantity: 1,
-      price: Number(liveReplacementProduct.price || 0),
-      ivuStateEnabled: liveReplacementProduct.ivuStateEnabled !== false,
-      ivuMunicipalEnabled: liveReplacementProduct.ivuMunicipalEnabled !== false
+    const returnedSubtotal = roundMoney(returnedUnitSubtotal * returnedQuantity);
+    const returnedDiscount = roundMoney(returnedUnitDiscount * returnedQuantity);
+    const returnedTaxableSubtotal = roundMoney(returnedUnitTaxableSubtotal * returnedQuantity);
+    const returnedStateTax = roundMoney(returnedUnitStateTax * returnedQuantity);
+    const returnedMunicipalTax = roundMoney(returnedUnitMunicipalTax * returnedQuantity);
+    const returnedTotal = roundMoney(returnedUnitTotal * returnedQuantity);
+    const liveReplacementItems = requestedReplacementItems.map((item) => {
+      const product = (currentData.products || []).find((entry) => entry.id === item.productId);
+      const pricing = calculateItemPricing({ quantity: item.quantity, price: Number(product.price || 0), ivuStateEnabled: product.ivuStateEnabled !== false, ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false });
+      return { ...item, product, pricing };
     });
-    const differenceAmount = roundMoney(nextReplacementPricing.total - returnedUnitTotal);
+    const replacementTotals = liveReplacementItems.reduce((totals, item) => ({
+      subtotal: roundMoney(totals.subtotal + item.pricing.subtotal),
+      discountAmount: roundMoney(totals.discountAmount + item.pricing.discountAmount),
+      taxableSubtotal: roundMoney(totals.taxableSubtotal + item.pricing.taxableSubtotal),
+      stateTax: roundMoney(totals.stateTax + item.pricing.stateTax),
+      municipalTax: roundMoney(totals.municipalTax + item.pricing.municipalTax),
+      totalTax: roundMoney(totals.totalTax + item.pricing.totalTax),
+      total: roundMoney(totals.total + item.pricing.total)
+    }), { subtotal: 0, discountAmount: 0, taxableSubtotal: 0, stateTax: 0, municipalTax: 0, totalTax: 0, total: 0 });
+    const differenceAmount = roundMoney(replacementTotals.total - returnedTotal);
     const exchangedAt = new Date().toISOString();
     const exchangeId = generateId('exchange');
     const refundRecord = differenceAmount < 0 ? normalizeSaleRefund({
@@ -878,26 +901,26 @@ function Sales() {
       exchangeId,
       items: [
         {
-          productId: liveReplacementProduct.id,
-          name: `Diferencia por cambio - ${liveReplacementProduct.name}`,
+          productId: '',
+          name: `Diferencia por cambio - ${liveReplacementItems.map((item) => item.product.name).join(', ')}`,
           quantity: 1,
-          price: roundMoney(nextReplacementPricing.taxableSubtotal - returnedUnitTaxableSubtotal),
-          subtotal: roundMoney(nextReplacementPricing.subtotal - returnedUnitSubtotal),
+          price: roundMoney(replacementTotals.taxableSubtotal - returnedTaxableSubtotal),
+          subtotal: roundMoney(replacementTotals.subtotal - returnedSubtotal),
           discountType: 'fixed',
-          discountValue: roundMoney(Math.max(0, nextReplacementPricing.discountAmount - returnedUnitDiscount)),
-          discountAmount: roundMoney(Math.max(0, nextReplacementPricing.discountAmount - returnedUnitDiscount)),
-          taxableSubtotal: roundMoney(nextReplacementPricing.taxableSubtotal - returnedUnitTaxableSubtotal),
-          ivuStateEnabled: liveReplacementProduct.ivuStateEnabled !== false,
-          ivuMunicipalEnabled: liveReplacementProduct.ivuMunicipalEnabled !== false,
+          discountValue: roundMoney(Math.max(0, replacementTotals.discountAmount - returnedDiscount)),
+          discountAmount: roundMoney(Math.max(0, replacementTotals.discountAmount - returnedDiscount)),
+          taxableSubtotal: roundMoney(replacementTotals.taxableSubtotal - returnedTaxableSubtotal),
+          ivuStateEnabled: true,
+          ivuMunicipalEnabled: true,
           nonInventory: true
         }
       ],
-      subtotal: roundMoney(nextReplacementPricing.subtotal - returnedUnitSubtotal),
-      discount: roundMoney(Math.max(0, nextReplacementPricing.discountAmount - returnedUnitDiscount)),
-      tax: roundMoney(nextReplacementPricing.totalTax - (returnedUnitStateTax + returnedUnitMunicipalTax)),
+      subtotal: roundMoney(replacementTotals.subtotal - returnedSubtotal),
+      discount: roundMoney(Math.max(0, replacementTotals.discountAmount - returnedDiscount)),
+      tax: roundMoney(replacementTotals.totalTax - (returnedStateTax + returnedMunicipalTax)),
       taxBreakdown: {
-        state: roundMoney(nextReplacementPricing.stateTax - returnedUnitStateTax),
-        municipal: roundMoney(nextReplacementPricing.municipalTax - returnedUnitMunicipalTax)
+        state: roundMoney(replacementTotals.stateTax - returnedStateTax),
+        municipal: roundMoney(replacementTotals.municipalTax - returnedMunicipalTax)
       },
       total: differenceAmount,
       status: 'paid',
@@ -940,21 +963,33 @@ function Sales() {
       adjustmentSaleId: adjustmentSale?.id || '',
       returnedItem: {
         saleItemKey: returnedOption.saleItemKey,
-        quantity: 1,
+        quantity: returnedQuantity,
         productId: originalSaleItem.productId || '',
         name: originalSaleItem.name,
         selectedSize: originalSaleItem.selectedSize || '',
         unitPrice: roundMoney(Number(originalSaleItem.price || 0)),
-        unitTotal: returnedUnitTotal
+        unitTotal: returnedUnitTotal,
+        total: returnedTotal
       },
-      replacementItem: {
-        quantity: 1,
-        productId: liveReplacementProduct.id,
-        name: liveReplacementProduct.name,
-        selectedSize: replacementSize,
-        unitPrice: roundMoney(Number(liveReplacementProduct.price || 0)),
-        unitTotal: nextReplacementPricing.total
-      }
+      replacementItems: liveReplacementItems.map((item) => ({
+        quantity: item.quantity,
+        productId: item.product.id,
+        name: item.product.name,
+        selectedSize: item.selectedSize || '',
+        unitPrice: roundMoney(Number(item.product.price || 0)),
+        unitTotal: roundMoney(item.pricing.total / item.quantity),
+        total: item.pricing.total
+      })),
+      // Se conserva para que los cambios anteriores y los reportes existentes sigan funcionando.
+      replacementItem: liveReplacementItems.length === 1 ? {
+        quantity: liveReplacementItems[0].quantity,
+        productId: liveReplacementItems[0].product.id,
+        name: liveReplacementItems[0].product.name,
+        selectedSize: liveReplacementItems[0].selectedSize || '',
+        unitPrice: roundMoney(Number(liveReplacementItems[0].product.price || 0)),
+        unitTotal: roundMoney(liveReplacementItems[0].pricing.total / liveReplacementItems[0].quantity),
+        total: liveReplacementItems[0].pricing.total
+      } : null
     };
 
     const refunds = refundRecord ? [...getSaleRefunds(originalSale), refundRecord] : getSaleRefunds(originalSale);
@@ -969,15 +1004,64 @@ function Sales() {
       refundedAmount: getSaleRefundTotal({ ...originalSale, refunds })
     };
 
-    const nextProducts = (currentData.products || []).map((product) => {
-      if (product.id === originalSaleItem.productId) {
-        return applyLocalStockChange(product, originalSaleItem.selectedSize || '', 1);
-      }
-      if (product.id === liveReplacementProduct.id) {
-        return applyLocalStockChange(product, replacementSize, -1);
-      }
-      return product;
-    });
+    const stockChanges = [
+      {
+        productId: originalSaleItem.productId,
+        productName: originalSaleItem.name,
+        selectedSize: originalSaleItem.selectedSize || '',
+        quantityDelta: returnedQuantity,
+        reason: `Cambio venta ${originalSale.id} - pieza recibida`,
+        performedBy: profile?.name || user?.email || 'Sistema',
+        performedById: user?.uid || '',
+        reference: originalSale.id
+      },
+      ...liveReplacementItems.map((item) => ({
+        productId: item.product.id,
+        productName: item.product.name,
+        selectedSize: item.selectedSize || '',
+        quantityDelta: -item.quantity,
+        reason: `Cambio venta ${originalSale.id} - pieza entregada`,
+        performedBy: profile?.name || user?.email || 'Sistema',
+        performedById: user?.uid || '',
+        reference: originalSale.id
+      }))
+    ];
+
+    const localInventoryLogs = stockChanges
+      .map((change) => {
+        const product = (currentData.products || []).find((entry) => entry.id === change.productId);
+        if (!product) return null;
+        const currentStock = Number(product.stock || 0);
+        const nextStock = Math.max(0, currentStock + Number(change.quantityDelta || 0));
+
+        return buildInventoryLogEntry({
+          id: generateId('invlog'),
+          productId: change.productId,
+          productName: change.productName || product.name || change.productId,
+          type: change.quantityDelta > 0 ? INVENTORY_MOVEMENT_TYPES.exchangeIn : INVENTORY_MOVEMENT_TYPES.exchangeOut,
+          quantity: Math.abs(Number(change.quantityDelta || 0)),
+          oldStock: currentStock,
+          newStock: nextStock,
+          reason: change.reason,
+          performedBy: change.performedBy,
+          performedById: change.performedById,
+          reference: change.reference
+        });
+      })
+      .filter(Boolean);
+
+    const nextProducts = (currentData.products || []).map((product) => (
+      stockChanges
+        .filter((change) => change.productId === product.id)
+        .reduce(
+          (nextProduct, change) => applyLocalStockChange(
+            nextProduct,
+            change.selectedSize || '',
+            Number(change.quantityDelta || 0)
+          ),
+          product
+        )
+    ));
 
     const nextSales = (currentData.sales || []).map((sale) => (
       sale.id === originalSale.id ? nextSale : sale
@@ -994,7 +1078,10 @@ function Sales() {
       ...currentData,
       sales: nextSales,
       payments: nextPayments,
-      products: nextProducts
+      products: nextProducts,
+      inventoryLogs: localInventoryLogs.length > 0
+        ? [...localInventoryLogs, ...(currentData.inventoryLogs || [])]
+        : currentData.inventoryLogs
     });
 
     upsertWeeklyCachedSale(nextSale);
@@ -1014,18 +1101,7 @@ function Sales() {
         nextSale,
         adjustmentSale,
         adjustmentPayments,
-        stockChanges: [
-          {
-            productId: originalSaleItem.productId,
-            selectedSize: originalSaleItem.selectedSize || '',
-            quantityDelta: 1
-          },
-          {
-            productId: liveReplacementProduct.id,
-            selectedSize: replacementSize,
-            quantityDelta: -1
-          }
-        ]
+        stockChanges
       });
 
       if (differenceAmount > 0) {
@@ -1037,6 +1113,16 @@ function Sales() {
       }
     } catch (error) {
       console.error('Error saving exchange:', error);
+      queuePendingExchange({
+        originalSale,
+        nextSale,
+        adjustmentSale,
+        adjustmentPayments,
+        stockChanges
+      });
+      syncPendingQueue().catch((syncError) => {
+        console.error('Error retrying pending exchange sync queue:', syncError);
+      });
       showNotification('warning', getFirestoreSyncErrorMessage(error));
     }
   };
@@ -1375,8 +1461,7 @@ function Sales() {
                         <strong>{exchange.returnedItem?.name || 'Pieza devuelta'}</strong>
                         {exchange.returnedItem?.selectedSize ? ` (${exchange.returnedItem.selectedSize})` : ''}
                         {' '}por{' '}
-                        <strong>{exchange.replacementItem?.name || 'Pieza nueva'}</strong>
-                        {exchange.replacementItem?.selectedSize ? ` (${exchange.replacementItem.selectedSize})` : ''}
+                        <strong>{(exchange.replacementItems || [exchange.replacementItem]).filter(Boolean).map((item) => `${item.name}${item.selectedSize ? ` (${item.selectedSize})` : ''}${item.quantity > 1 ? ` x${item.quantity}` : ''}`).join(', ') || 'Pieza nueva'}</strong>
                       </div>
                       <div className="text-sm">
                         {exchange.settlementType === 'collect' && (
@@ -1422,58 +1507,43 @@ function Sales() {
               <div className="flex justify-between"><span>Máximo disponible</span><strong className="text-emerald-700">{formatCurrency(Math.max(0, Number(refundTarget.total || 0) - getSaleRefundTotal(refundTarget)))}</strong></div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Producto a reembolsar</label>
-              <select
-                value={refundForm.saleItemKey}
-                onChange={(e) => setRefundForm((current) => ({
-                  ...current,
-                  saleItemKey: e.target.value,
-                  quantity: 1
-                }))}
-                className="input w-full"
-              >
-                <option value="">Ningún artículo (reembolso por monto)</option>
-                {refundItemOptions.map((option) => (
-                  <option key={option.saleItemKey} value={option.saleItemKey}>
-                    {option.item.name}
-                    {option.item.selectedSize ? ` (${option.item.selectedSize})` : ''}
-                    {' - '}
-                    {formatCurrency(option.unitAmount)}
-                    {' - disponible: '}
-                    {option.availableToRefund}
-                  </option>
-                ))}
-              </select>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button type="button" onClick={() => setRefundForm((current) => ({ ...current, mode: 'items' }))} className={`rounded-lg border p-3 text-left ${refundForm.mode === 'items' ? 'border-blue-600 bg-blue-50 text-blue-900' : 'border-gray-200'}`}>
+                <span className="block font-semibold">Seleccionar artículos</span>
+                <span className="block text-xs mt-1">Elige uno o varios productos y sus cantidades.</span>
+              </button>
+              <button type="button" onClick={() => setRefundForm((current) => ({ ...current, mode: 'total' }))} className={`rounded-lg border p-3 text-left ${refundForm.mode === 'total' ? 'border-blue-600 bg-blue-50 text-blue-900' : 'border-gray-200'}`}>
+                <span className="block font-semibold">Reembolso total</span>
+                <span className="block text-xs mt-1">Devuelve todo el balance pendiente de esta venta.</span>
+              </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {refundForm.mode === 'items' ? (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Cantidad</label>
-                <input
-                  type="number"
-                  min="1"
-                  max={selectedRefundItem?.availableToRefund || 1}
-                  step="1"
-                  value={refundForm.quantity}
-                  onChange={(e) => setRefundForm((current) => ({ ...current, quantity: e.target.value }))}
-                  className="input w-full"
-                  disabled={!selectedRefundItem}
-                />
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Artículos a reembolsar</label>
+                  <button type="button" className="text-sm text-blue-700 font-medium hover:underline" onClick={() => setRefundForm((current) => ({ ...current, itemQuantities: Object.fromEntries(refundItemOptions.map((item) => [item.saleItemKey, item.availableToRefund])) }))}>Seleccionar todos</button>
+                </div>
+                <div className="rounded-lg border border-gray-200 divide-y max-h-64 overflow-y-auto">
+                  {refundItemOptions.map((option) => {
+                    const quantity = refundForm.itemQuantities?.[option.saleItemKey] || '';
+                    return (
+                      <div key={option.saleItemKey} className="flex items-center gap-3 p-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium truncate">{option.item.name}{option.item.selectedSize ? ` (${option.item.selectedSize})` : ''}</p>
+                          <p className="text-xs text-gray-500">{formatCurrency(option.unitAmount)} c/u · disponibles: {option.availableToRefund}</p>
+                        </div>
+                        <input aria-label={`Cantidad de ${option.item.name}`} type="number" min="0" max={option.availableToRefund} step="1" value={quantity} onChange={(e) => setRefundForm((current) => ({ ...current, itemQuantities: { ...current.itemQuantities, [option.saleItemKey]: e.target.value } }))} className="input w-20 text-center" />
+                      </div>
+                    );
+                  })}
+                  {refundItemOptions.length === 0 && <p className="p-3 text-sm text-gray-500">No hay artículos disponibles para reembolsar.</p>}
+                </div>
+                <div className="mt-2 flex justify-between text-sm"><span className="text-gray-600">Total de artículos seleccionados</span><strong>{formatCurrency(selectedRefundItemsAmount)}</strong></div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Monto</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={refundForm.amount}
-                  onChange={(e) => setRefundForm((current) => ({ ...current, amount: e.target.value }))}
-                  className="input w-full"
-                />
-                <p className="mt-1 text-xs text-gray-500">Puedes ajustar este monto manualmente si el refund no es por el total de la pieza.</p>
-              </div>
-            </div>
+            ) : (
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">Se reembolsará el balance completo: <strong>{formatCurrency(Math.max(0, Number(refundTarget.total || 0) - getSaleRefundTotal(refundTarget)))}</strong>.</div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Método del refund</label>
@@ -1523,7 +1593,7 @@ function Sales() {
                 Cancelar
               </button>
               <button type="button" className="btn btn-primary" onClick={handleRefund}>
-                Guardar refund
+                Confirmar reembolso
               </button>
             </div>
           </div>
@@ -1545,7 +1615,7 @@ function Sales() {
             <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-sm space-y-2">
               <div className="font-medium text-amber-900">Flujo rapido</div>
               <div className="text-amber-800">1. Escoge la pieza que devuelve.</div>
-              <div className="text-amber-800">2. Escoge la pieza nueva.</div>
+              <div className="text-amber-800">2. Agrega una o varias piezas nuevas.</div>
               <div className="text-amber-800">3. El sistema calcula si te paga, si le devuelves, o si queda parejo.</div>
             </div>
 
@@ -1553,7 +1623,7 @@ function Sales() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Pieza que devuelve</label>
               <select
                 value={exchangeForm.returnedItemKey}
-                onChange={(e) => setExchangeForm((current) => ({ ...current, returnedItemKey: e.target.value }))}
+                onChange={(e) => setExchangeForm((current) => ({ ...current, returnedItemKey: e.target.value, returnedQuantity: 1 }))}
                 className="input w-full"
               >
                 <option value="">Selecciona una pieza</option>
@@ -1570,9 +1640,25 @@ function Sales() {
               </select>
             </div>
 
+            {selectedReturnedOption && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Cantidad que devuelve</label>
+                <input
+                  type="number"
+                  min="1"
+                  max={selectedReturnedOption.availableToExchange}
+                  step="1"
+                  value={exchangeForm.returnedQuantity}
+                  onChange={(e) => setExchangeForm((current) => ({ ...current, returnedQuantity: e.target.value }))}
+                  className="input w-full"
+                />
+                <p className="mt-1 text-xs text-gray-500">Máximo disponible para cambio: {selectedReturnedOption.availableToExchange}</p>
+              </div>
+            )}
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Pieza nueva que se lleva</label>
-              {replacementProduct ? (
+              {false ? (
                 <div className="flex items-center justify-between rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2">
                   <div>
                     <p className="text-sm font-medium text-gray-800">{replacementProduct.name}</p>
@@ -1609,7 +1695,10 @@ function Sales() {
                             key={product.id}
                             type="button"
                             onClick={() => {
-                              setExchangeForm((current) => ({ ...current, replacementProductId: product.id, replacementSize: '' }));
+                              setExchangeForm((current) => ({
+                                ...current,
+                                replacementItems: [...current.replacementItems, { id: generateId('replacement'), productId: product.id, selectedSize: '', quantity: 1 }]
+                              }));
                               setExchangeReplacementSearch('');
                             }}
                             className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50 border-b border-gray-100 last:border-b-0 text-left"
@@ -1625,7 +1714,7 @@ function Sales() {
               )}
             </div>
 
-            {replacementProduct?.useSizeSelection && (
+            {false && replacementProduct?.useSizeSelection && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Talla o size</label>
                 <select
@@ -1643,15 +1732,54 @@ function Sales() {
               </div>
             )}
 
-            {(selectedReturnedOption || replacementProduct) && (
+            {false && replacementProduct && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Cantidad de piezas nuevas</label>
+                <input
+                  type="number"
+                  min="1"
+                  max={getProductStockForExchange(replacementProduct, replacementSize)}
+                  step="1"
+                  value={exchangeForm.replacementQuantity}
+                  onChange={(e) => setExchangeForm((current) => ({ ...current, replacementQuantity: e.target.value }))}
+                  className="input w-full"
+                  disabled={replacementProduct.useSizeSelection && !replacementSize}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Disponible: {replacementProduct.useSizeSelection && !replacementSize
+                    ? 'selecciona una talla'
+                    : getProductStockForExchange(replacementProduct, replacementSize)}
+                </p>
+              </div>
+            )}
+
+            {replacementItems.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-gray-700">Piezas agregadas</p>
+                {replacementItems.map((item) => (
+                  <div key={item.id} className="rounded-lg border border-emerald-300 bg-emerald-50 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div><p className="text-sm font-medium">{item.product.name}</p><p className="text-xs text-gray-500">{formatCurrency(item.product.price || 0)}</p></div>
+                      <button type="button" className="text-gray-400 hover:text-red-500 text-xl" onClick={() => setExchangeForm((current) => ({ ...current, replacementItems: current.replacementItems.filter((entry) => entry.id !== item.id) }))}>×</button>
+                    </div>
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {item.product.useSizeSelection && <select className="input" value={item.selectedSize} onChange={(e) => setExchangeForm((current) => ({ ...current, replacementItems: current.replacementItems.map((entry) => entry.id === item.id ? { ...entry, selectedSize: e.target.value } : entry) }))}><option value="">Selecciona talla</option>{replacementSizeOptions(item.product).map((size) => <option key={size} value={size}>{size} - stock {getProductStockForExchange(item.product, size)}</option>)}</select>}
+                      <input type="number" min="1" step="1" className="input" value={item.quantity} disabled={item.product.useSizeSelection && !item.selectedSize} onChange={(e) => setExchangeForm((current) => ({ ...current, replacementItems: current.replacementItems.map((entry) => entry.id === item.id ? { ...entry, quantity: e.target.value } : entry) }))} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {(selectedReturnedOption || replacementItems.length > 0) && (
               <div className="rounded-lg bg-gray-50 p-4 space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span>Valor pieza devuelta</span>
-                  <strong>{formatCurrency(selectedReturnedOption?.unitTotal || 0)}</strong>
+                  <span>Valor devuelto ({exchangeReturnedQuantity} pieza{exchangeReturnedQuantity !== 1 ? 's' : ''})</span>
+                  <strong>{formatCurrency((selectedReturnedOption?.unitTotal || 0) * exchangeReturnedQuantity)}</strong>
                 </div>
                 <div className="flex justify-between">
-                  <span>Valor pieza nueva</span>
-                  <strong>{formatCurrency(replacementPricing?.total || 0)}</strong>
+                  <span>Valor piezas nuevas ({replacementPricings.reduce((sum, item) => sum + item.quantity, 0)})</span>
+                  <strong>{formatCurrency(replacementPricings.reduce((sum, item) => sum + item.pricing.total, 0))}</strong>
                 </div>
                 <div className="flex justify-between border-t pt-2">
                   <span>Diferencia</span>

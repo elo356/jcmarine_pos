@@ -17,12 +17,17 @@ import Notification from '../components/Notification';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import {
   addInventoryLog,
+  applyProductStockDelta,
   subscribeInventoryLogs,
-  subscribeProducts,
-  updateProductStock
+  subscribeProducts
 } from '../services/inventoryService';
+import { queuePendingStockAdjustment, syncPendingQueue } from '../services/pendingSyncService';
+import { findOrphanedLocalSales, reconcileOrphanedLocalSales } from '../services/inventoryReconciliationService';
+import { buildInventoryLogEntry, INVENTORY_MOVEMENT_TYPES } from '../utils/inventoryLogUtils';
+import { useAuth } from '../contexts/AuthContext';
 
 const Inventory = () => {
+  const { profile } = useAuth();
   const [products, setProducts] = useState([]);
   const [inventoryLogs, setInventoryLogs] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -35,6 +40,10 @@ const Inventory = () => {
   const [adjustmentReason, setAdjustmentReason] = useState('');
   const [notification, setNotification] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [showDiagnosticModal, setShowDiagnosticModal] = useState(false);
+  const [diagnosticLoading, setDiagnosticLoading] = useState(false);
+  const [diagnosticResult, setDiagnosticResult] = useState(null);
+  const [reconciling, setReconciling] = useState(false);
   const PAGE_SIZE = 80;
   const debouncedSearch = useDebouncedValue(searchTerm, 250);
 
@@ -198,18 +207,18 @@ const Inventory = () => {
       : Math.max(0, oldStock - adjustmentQty);
 
     // Add inventory log
-    const log = {
-      id: generateId(),
+    const log = buildInventoryLogEntry({
+      id: generateId('invlog'),
       productId: selectedProduct.id,
       productName: selectedProduct.name,
-      type: adjustmentType === 'add' ? 'adjustment_in' : 'adjustment_out',
+      type: adjustmentType === 'add' ? INVENTORY_MOVEMENT_TYPES.adjustmentIn : INVENTORY_MOVEMENT_TYPES.adjustmentOut,
       quantity: adjustmentQty,
       oldStock,
       newStock,
       reason: adjustmentReason || 'Manual adjustment',
-      date: new Date().toISOString(),
-      userId: 'current_user'
-    };
+      performedBy: profile?.name || 'Sistema',
+      performedById: profile?.uid || ''
+    });
 
     const data = loadData();
     const localProductIndex = data.products.findIndex((p) => p.id === selectedProduct.id);
@@ -219,23 +228,72 @@ const Inventory = () => {
       saveData(data); // fallback/local compatibility
     }
 
+    const delta = adjustmentType === 'add' ? adjustmentQty : -adjustmentQty;
+
     let synced = true;
     try {
-      await updateProductStock(selectedProduct.id, newStock);
+      await applyProductStockDelta(selectedProduct.id, delta);
       await addInventoryLog(log);
     } catch (error) {
       synced = false;
       console.error('Error persisting inventory adjustment to Firestore:', error);
+      queuePendingStockAdjustment({
+        productId: selectedProduct.id,
+        productName: selectedProduct.name,
+        delta,
+        log
+      });
+      syncPendingQueue().catch((syncError) => {
+        console.error('Error retrying pending sync queue:', syncError);
+      });
     }
 
     setNotification({
       type: synced ? 'success' : 'warning',
       message: synced
         ? `Stock adjusted successfully: ${selectedProduct.name} (${oldStock} → ${newStock})`
-        : `Ajuste aplicado localmente: ${selectedProduct.name} (${oldStock} → ${newStock}). Falló sincronización con Firestore.`
+        : `Ajuste guardado: ${selectedProduct.name} (${oldStock} → ${newStock}). No se pudo confirmar con el servidor todavia; se reintentara automaticamente.`
     });
 
     closeAdjustModal();
+  };
+
+  const runInventoryDiagnostic = async () => {
+    setShowDiagnosticModal(true);
+    setDiagnosticLoading(true);
+    setDiagnosticResult(null);
+    try {
+      const result = await findOrphanedLocalSales();
+      setDiagnosticResult(result);
+    } catch (error) {
+      console.error('Error running inventory diagnostic:', error);
+      setNotification({ type: 'error', message: 'No se pudo completar el diagnostico. Intenta de nuevo.' });
+      setShowDiagnosticModal(false);
+    } finally {
+      setDiagnosticLoading(false);
+    }
+  };
+
+  const applyDiagnosticFix = async () => {
+    if (!diagnosticResult?.orphanedSales?.length) return;
+    setReconciling(true);
+    try {
+      const { reconciledCount, productsAdjusted } = await reconcileOrphanedLocalSales(
+        diagnosticResult.orphanedSales,
+        profile?.name || 'Sistema'
+      );
+      setNotification({
+        type: 'success',
+        message: `Inventario corregido: ${productsAdjusted} producto(s) ajustado(s) a partir de ${reconciledCount} venta(s) no sincronizada(s).`
+      });
+      setShowDiagnosticModal(false);
+      setDiagnosticResult(null);
+    } catch (error) {
+      console.error('Error reconciling inventory:', error);
+      setNotification({ type: 'error', message: 'No se pudo aplicar la correccion. Intenta de nuevo.' });
+    } finally {
+      setReconciling(false);
+    }
   };
 
   const getStockBadge = (item) => {
@@ -274,6 +332,11 @@ const Inventory = () => {
           <Package className="text-primary-600" size={28} />
           <h1 className="page-title">Inventory Management</h1>
         </div>
+        {profile?.role === 'admin' && (
+          <button type="button" className="btn btn-secondary" onClick={runInventoryDiagnostic}>
+            Auditar ventas no sincronizadas
+          </button>
+        )}
       </div>
 
       {/* Stats Cards */}
@@ -513,6 +576,86 @@ const Inventory = () => {
               <button onClick={handleAdjustment} className="btn-primary">
                 Confirm Adjustment
               </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Unsynced Sales Diagnostic Modal */}
+      {showDiagnosticModal && (
+        <Modal
+          isOpen={showDiagnosticModal}
+          onClose={() => setShowDiagnosticModal(false)}
+          title="Ventas no sincronizadas en este equipo"
+          size="lg"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Busca ventas guardadas en este navegador que nunca llegaron a confirmarse en el servidor
+              (por ejemplo, por un fallo de red al cobrar). Esas ventas descontaron el producto
+              fisicamente pero no el stock que ven las demas terminales. Este diagnostico solo revisa
+              lo guardado en este equipo — si el problema ocurrio en otra caja, hay que correrlo ahi tambien.
+            </p>
+
+            {diagnosticLoading && (
+              <p className="text-sm text-gray-500">Analizando...</p>
+            )}
+
+            {!diagnosticLoading && diagnosticResult && diagnosticResult.orphanedSales.length === 0 && (
+              <p className="text-sm text-green-700">
+                No se encontraron ventas sin sincronizar en este equipo.
+              </p>
+            )}
+
+            {!diagnosticLoading && diagnosticResult && diagnosticResult.orphanedSales.length > 0 && (
+              <>
+                <p className="text-sm text-amber-800">
+                  Se encontraron {diagnosticResult.orphanedSales.length} venta(s) sin sincronizar,
+                  afectando {diagnosticResult.affectedProducts.length} producto(s):
+                </p>
+                <div className="table-container">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Producto</th>
+                        <th>Vendido sin descontar</th>
+                        <th>Stock actual (Firestore)</th>
+                        <th>Stock real estimado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {diagnosticResult.affectedProducts.map((row) => (
+                        <tr key={row.productId}>
+                          <td>{row.name}{!row.productExists ? ' (producto no encontrado)' : ''}</td>
+                          <td>{row.unsyncedQuantitySold}</td>
+                          <td>{row.firestoreStock ?? '-'}</td>
+                          <td>{row.estimatedRealStock ?? '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShowDiagnosticModal(false)}
+              >
+                Cerrar
+              </button>
+              {diagnosticResult?.orphanedSales?.length > 0 && (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={applyDiagnosticFix}
+                  disabled={reconciling}
+                >
+                  {reconciling ? 'Aplicando...' : 'Aplicar correccion'}
+                </button>
+              )}
             </div>
           </div>
         </Modal>

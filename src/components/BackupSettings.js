@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Archive, CheckCircle, FolderOpen, Play, RefreshCw } from 'lucide-react';
+import { CheckCircle, FolderOpen, Play, RefreshCw } from 'lucide-react';
 import {
   chooseBackupFolder,
   getBackupState,
