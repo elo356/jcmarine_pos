@@ -101,7 +101,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
     sizeStocks: [],
     ivuStateEnabled: true,
     ivuMunicipalEnabled: true,
-    linkedProductIds: []
+    linkedProductIds: [],
+    isCustomPriceItem: false
   });
   const categoryColorPalette = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316'];
   const buildEditableBarcodes = useCallback(
@@ -221,7 +222,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sizeStocks: [{ size: '', stock: '' }],
         ivuStateEnabled: template.ivuStateEnabled !== false,
         ivuMunicipalEnabled: template.ivuMunicipalEnabled !== false,
-        linkedProductIds: []
+        linkedProductIds: [],
+        isCustomPriceItem: false
       });
       setShowModal(true);
       onPendingDraftHandled();
@@ -250,7 +252,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       sizeStocks: [{ size: '', stock: '' }],
       ivuStateEnabled: true,
       ivuMunicipalEnabled: true,
-      linkedProductIds: []
+      linkedProductIds: [],
+      isCustomPriceItem: false
     });
     setShowModal(true);
     onPendingDraftHandled();
@@ -569,7 +572,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sizeStocks: buildEditableSizeStocks(product.sizeStocks, product.availableSizes, product.stock),
         ivuStateEnabled: product.ivuStateEnabled !== false,
         ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false,
-        linkedProductIds: product.linkedProductIds || []
+        linkedProductIds: product.linkedProductIds || [],
+        isCustomPriceItem: product.isCustomPriceItem === true
       });
       setActiveBarcodeFieldIndex(0);
     } else {
@@ -593,7 +597,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sizeStocks: [{ size: '', stock: '' }],
         ivuStateEnabled: true,
         ivuMunicipalEnabled: true,
-        linkedProductIds: []
+        linkedProductIds: [],
+        isCustomPriceItem: false
       });
       setActiveBarcodeFieldIndex(0);
     }
@@ -621,7 +626,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
       sizeStocks: [{ size: '', stock: '' }],
       ivuStateEnabled: true,
       ivuMunicipalEnabled: true,
-      linkedProductIds: []
+      linkedProductIds: [],
+      isCustomPriceItem: false
     });
     setActiveBarcodeFieldIndex(0);
   };
@@ -826,7 +832,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
             sizeStocks,
             ivuStateEnabled: formData.ivuStateEnabled,
             ivuMunicipalEnabled: formData.ivuMunicipalEnabled,
-            linkedProductIds
+            linkedProductIds,
+            isCustomPriceItem: formData.isCustomPriceItem === true
           };
         }
         return p;
@@ -904,7 +911,8 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
         sizeStocks,
         ivuStateEnabled: formData.ivuStateEnabled,
         ivuMunicipalEnabled: formData.ivuMunicipalEnabled,
-        linkedProductIds
+        linkedProductIds,
+        isCustomPriceItem: formData.isCustomPriceItem === true
       };
 
       const withNewProduct = [...currentProducts, newProduct];
@@ -1868,6 +1876,23 @@ function Products({ pendingDraft = null, onPendingDraftHandled = () => {} }) {
                   <span className="text-sm font-medium text-gray-700">1% IVU</span>
                 </label>
               </div>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="flex items-center gap-2 cursor-pointer rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <input
+                  type="checkbox"
+                  checked={formData.isCustomPriceItem}
+                  onChange={(e) => setFormData({ ...formData, isCustomPriceItem: e.target.checked })}
+                  className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                />
+                <span className="text-sm">
+                  <span className="block font-medium text-gray-700">Precio y nombre personalizados al cobrar (ej. "Otro")</span>
+                  <span className="block text-gray-500">
+                    En el Punto de Venta aparece fijo y visible arriba de la lista de productos. Al cobrarlo, pide el precio y el nombre que saldrá en el recibo en vez de usar los de aquí. No descuenta inventario.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <div className="md:col-span-2">

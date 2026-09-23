@@ -5,6 +5,7 @@ import {
   Package, 
   Users, 
   TrendingUp,
+  TrendingDown,
   AlertTriangle,
   ArrowUpRight
 } from 'lucide-react';
@@ -68,19 +69,43 @@ function Dashboard() {
     // Calcular estadísticas
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const isInDateRange = (value, start, end) => {
+      const timestamp = new Date(value).getTime();
+      return Number.isFinite(timestamp) && timestamp >= start.getTime() && timestamp < end.getTime();
+    };
     
     const paidSales = sales.filter(isReportableSale);
-    const todaySales = paidSales.filter(s => new Date(s.date) >= today);
+    const todaySales = paidSales.filter((sale) => isInDateRange(sale.date || sale.created_at, today, tomorrow));
     const todaySalesGross = todaySales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
-    const todayRefunds = sales.reduce((sum, sale) => sum + getSaleRefundTotalFrom(sale, today), 0);
+    const todayRefunds = sales.reduce((sum, sale) => (
+      sum + getSaleRefundTotalFrom(sale, today) - getSaleRefundTotalFrom(sale, tomorrow)
+    ), 0);
+    const yesterdaySales = paidSales.filter((sale) => isInDateRange(sale.date || sale.created_at, yesterday, today));
+    const yesterdaySalesGross = yesterdaySales.reduce((sum, sale) => sum + Number(sale.total || 0), 0);
+    const yesterdayRefunds = sales.reduce((sum, sale) => (
+      sum + getSaleRefundTotalFrom(sale, yesterday) - getSaleRefundTotalFrom(sale, today)
+    ), 0);
     const totalStandaloneSpecialRevenue = getStandaloneSpecialOrderPaymentNet(specialOrderPayments, sales);
     const todayStandaloneSpecialRevenue = getStandaloneSpecialOrderPaymentNet(
       specialOrderPayments,
       sales,
-      (payment) => new Date(payment.createdAt || payment.confirmed_at) >= today
+      (payment) => isInDateRange(payment.createdAt || payment.confirmed_at, today, tomorrow)
+    );
+    const yesterdayStandaloneSpecialRevenue = getStandaloneSpecialOrderPaymentNet(
+      specialOrderPayments,
+      sales,
+      (payment) => isInDateRange(payment.createdAt || payment.confirmed_at, yesterday, today)
     );
     const totalRevenue = paidSales.reduce((sum, sale) => sum + getNetSaleTotal(sale), 0) + totalStandaloneSpecialRevenue;
     const todayRevenue = todaySalesGross + todayStandaloneSpecialRevenue - todayRefunds;
+    const yesterdayRevenue = yesterdaySalesGross + yesterdayStandaloneSpecialRevenue - yesterdayRefunds;
+    const revenueChangePercent = yesterdayRevenue === 0
+      ? null
+      : ((todayRevenue - yesterdayRevenue) / Math.abs(yesterdayRevenue)) * 100;
     const lowStock = products.filter(p => p.stock <= p.lowStockThreshold);
     const readyOrders = hydratedSpecialOrders.filter((order) => order.orderStatus === SPECIAL_ORDER_STATUS.ready_for_pickup);
     const pendingBalance = hydratedSpecialOrders
@@ -97,6 +122,7 @@ function Dashboard() {
     setStats({
       todaySales: todaySales.length,
       todayRevenue,
+      revenueChangePercent,
       totalProducts: products.length,
       lowStockCount: lowStock.length,
       totalRevenue,
@@ -168,10 +194,14 @@ function Dashboard() {
             <div>
               <p className="text-sm text-gray-500 mb-1">Ingresos Hoy</p>
               <p className="text-3xl font-bold text-gray-900">{formatCurrency(stats.todayRevenue || 0)}</p>
-              <p className="text-sm text-green-600 mt-2 flex items-center gap-1">
-                <ArrowUpRight size={16} />
-                +8% vs ayer
-              </p>
+              {stats.revenueChangePercent === null ? (
+                <p className="text-sm text-gray-500 mt-2">Sin ingresos ayer</p>
+              ) : (
+                <p className={`text-sm mt-2 flex items-center gap-1 ${stats.revenueChangePercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {stats.revenueChangePercent >= 0 ? <ArrowUpRight size={16} /> : <TrendingDown size={16} />}
+                  {stats.revenueChangePercent >= 0 ? '+' : ''}{Math.round(stats.revenueChangePercent)}% vs ayer
+                </p>
+              )}
             </div>
             <div className="w-14 h-14 bg-green-100 rounded-xl flex items-center justify-center">
               <DollarSign size={28} className="text-green-600" />

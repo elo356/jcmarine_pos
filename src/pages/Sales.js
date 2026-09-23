@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowRightLeft, Calendar, Eye, Filter, Printer, Receipt, RotateCcw } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowRightLeft, Calendar, Eye, Filter, Printer, Receipt, RotateCcw, Search } from 'lucide-react';
 import Modal from '../components/Modal';
 import Notification from '../components/Notification';
 import {
@@ -14,7 +14,7 @@ import {
   saveData
 } from '../data/demoData';
 import { subscribeProducts } from '../services/inventoryService';
-import { refundSale, registerSaleExchange, resetAllSaleExchangesSync, saveSale, subscribeSales } from '../services/salesService';
+import { findSalesByProductIds, findSalesByReceipt, getSalesPage, refundSale, registerSaleExchange, resetAllSaleExchangesSync, saveSale } from '../services/salesService';
 import { queuePendingExchange, queuePendingRefund, syncPendingQueue } from '../services/pendingSyncService';
 import { subscribeSpecialOrders } from '../services/specialOrdersService';
 import { syncWeeklySalesCache, upsertWeeklyCachedSale } from '../services/weeklySalesCacheService';
@@ -55,6 +55,7 @@ const DEFAULT_EXCHANGE_FORM = {
   settlementReference: '',
   notes: ''
 };
+const SALES_PAGE_SIZE = 25;
 
 const getSaleItemKey = (saleId, item = {}, index = 0) =>
   `${saleId}::${item.productId || item.sourceSpecialOrderItemId || item.id || 'item'}::${index}`;
@@ -147,6 +148,12 @@ function Sales() {
   const [products, setProducts] = useState([]);
   const [filterDate, setFilterDate] = useState('');
   const [filterMethod, setFilterMethod] = useState('');
+  const [receiptSearch, setReceiptSearch] = useState('');
+  const [productSearch, setProductSearch] = useState('');
+  const [pageNumber, setPageNumber] = useState(1);
+  const [hasMoreSales, setHasMoreSales] = useState(false);
+  const [isLoadingSales, setIsLoadingSales] = useState(true);
+  const pageCursorsRef = useRef([]);
   const [notification, setNotification] = useState(null);
   const [selectedSale, setSelectedSale] = useState(null);
   const [refundTarget, setRefundTarget] = useState(null);
@@ -159,28 +166,64 @@ function Sales() {
   useEffect(() => {
     const data = loadData();
     setSpecialOrders(data.specialOrders || []);
-    const initialMigration = persistHydratedLegacySpecialOrderSales(data.sales || [], data.specialOrders || []);
-    if (initialMigration.changed) {
-      saveData({
-        ...data,
-        sales: initialMigration.hydratedSales
-      });
-    }
-    setSales(initialMigration.hydratedSales);
-
-    const unsubscribe = subscribeSales(
-      (rows) => {
-        const latestData = loadData();
-        const migration = persistHydratedLegacySpecialOrderSales(rows || [], latestData.specialOrders || []);
-        setSales(migration.hydratedSales);
-      },
-      (error) => {
-        console.error('Error subscribing sales:', error);
-      }
-    );
-
-    return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const normalizedReceipt = receiptSearch.trim();
+    const normalizedProduct = productSearch.trim().toLowerCase();
+
+    const loadSales = async () => {
+      setIsLoadingSales(true);
+      try {
+        let result;
+        if (normalizedReceipt) {
+          result = {
+            sales: await findSalesByReceipt(normalizedReceipt),
+            cursor: null,
+            hasMore: false
+          };
+        } else if (normalizedProduct) {
+          const matchingProductIds = products
+            .filter((product) => [
+              product.id,
+              product.sku,
+              product.name,
+              ...getProductBarcodes(product)
+            ].filter(Boolean).some((value) => String(value).toLowerCase().includes(normalizedProduct)))
+            .map((product) => product.id);
+          result = {
+            sales: await findSalesByProductIds(matchingProductIds),
+            cursor: null,
+            hasMore: false
+          };
+        } else {
+          const cursor = pageNumber > 1 ? pageCursorsRef.current[pageNumber - 2] : null;
+          result = await getSalesPage({ pageSize: SALES_PAGE_SIZE, cursor });
+        }
+
+        if (cancelled) return;
+        const migration = persistHydratedLegacySpecialOrderSales(result.sales || [], specialOrders);
+        setSales(migration.hydratedSales);
+        setHasMoreSales(result.hasMore);
+        if (!normalizedReceipt && !normalizedProduct && result.cursor) {
+          pageCursorsRef.current[pageNumber - 1] = result.cursor;
+        }
+      } catch (error) {
+        console.error('Error loading sales history:', error);
+        if (!cancelled) {
+          setSales([]);
+          setHasMoreSales(false);
+          showNotification('error', 'No se pudo cargar el historial de ventas.');
+        }
+      } finally {
+        if (!cancelled) setIsLoadingSales(false);
+      }
+    };
+
+    loadSales();
+    return () => { cancelled = true; };
+  }, [pageNumber, productSearch, products, receiptSearch, specialOrders]);
 
   useEffect(() => {
     const unsubscribe = subscribeSpecialOrders(
@@ -217,10 +260,10 @@ function Sales() {
 
   useEffect(() => {
     const data = loadData();
-    setProducts((data.products || []).filter((product) => product.active !== false));
+    setProducts(data.products || []);
 
     const unsubscribe = subscribeProducts(
-      (rows) => setProducts((rows || []).filter((product) => product.active !== false)),
+      (rows) => setProducts(rows || []),
       (error) => {
         console.error('Error subscribing products for exchanges:', error);
       }
@@ -373,6 +416,7 @@ function Sales() {
     if (!query) return products;
 
     return products.filter((product) => {
+      if (product.active === false) return false;
       const searchableText = [
         product.name,
         product.sku,
@@ -1144,6 +1188,36 @@ function Sales() {
             <h3 className="text-lg font-semibold">Historial de Ventas</h3>
             <div className="flex flex-wrap items-start gap-2">
               <div className="relative">
+                <Receipt size={20} className="absolute left-3 top-3 text-gray-400" />
+                <input
+                  type="search"
+                  value={receiptSearch}
+                  onChange={(e) => {
+                    setReceiptSearch(e.target.value);
+                    setPageNumber(1);
+                    pageCursorsRef.current = [];
+                  }}
+                  className="input pl-10 w-52"
+                  placeholder="Número de recibo"
+                  aria-label="Buscar por número de recibo"
+                />
+              </div>
+              <div className="relative">
+                <Search size={20} className="absolute left-3 top-3 text-gray-400" />
+                <input
+                  type="search"
+                  value={productSearch}
+                  onChange={(e) => {
+                    setProductSearch(e.target.value);
+                    setPageNumber(1);
+                    pageCursorsRef.current = [];
+                  }}
+                  className="input pl-10 w-60"
+                  placeholder="Producto, SKU o código"
+                  aria-label="Buscar ventas por producto"
+                />
+              </div>
+              <div className="relative">
                 <Calendar size={20} className="absolute left-3 top-3 text-gray-400" />
                 <input
                   type="date"
@@ -1307,7 +1381,31 @@ function Sales() {
         {filteredSales.length === 0 && (
           <div className="text-center py-12 text-gray-400">
             <Filter size={48} className="mx-auto mb-2" />
-            <p>No se encontraron ventas</p>
+            <p>{isLoadingSales ? 'Cargando ventas...' : 'No se encontraron ventas'}</p>
+          </div>
+        )}
+
+        {!receiptSearch.trim() && !productSearch.trim() && (
+          <div className="flex items-center justify-between gap-3 border-t px-6 py-4">
+            <span className="text-sm text-gray-500">Página {pageNumber}</span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={pageNumber === 1 || isLoadingSales}
+                onClick={() => setPageNumber((current) => Math.max(1, current - 1))}
+              >
+                Anterior
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={!hasMoreSales || isLoadingSales}
+                onClick={() => setPageNumber((current) => current + 1)}
+              >
+                Siguiente
+              </button>
+            </div>
           </div>
         )}
       </div>

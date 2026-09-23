@@ -17,7 +17,8 @@ function RegisterSpecialOrderPaymentModal({
   order,
   mode = 'payment',
   spinConfiguration = null,
-  spinConfigurationMessage = ''
+  spinConfigurationMessage = '',
+  disabledReason = ''
 }) {
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState('cash');
@@ -43,6 +44,10 @@ function RegisterSpecialOrderPaymentModal({
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (disabledReason) {
+      setError(disabledReason);
+      return;
+    }
     const normalizedAmount = Number(amount || 0);
     if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
       setError('Ingresa un monto valido');
@@ -76,6 +81,12 @@ function RegisterSpecialOrderPaymentModal({
     >
       {order && (
         <form className="space-y-4" onSubmit={handleSubmit}>
+          {disabledReason && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm font-medium text-amber-800">
+              {disabledReason}
+            </div>
+          )}
+
           <div className="rounded-lg bg-gray-50 p-4 space-y-2">
             <div className="flex justify-between">
               <span>Pedido</span>
@@ -187,7 +198,7 @@ function RegisterSpecialOrderPaymentModal({
             <button type="button" className="btn btn-secondary" onClick={handleClose}>
               Cancelar
             </button>
-            <button type="submit" className={`btn ${mode === 'refund' ? 'btn-secondary' : 'btn-primary'}`}>
+            <button type="submit" className={`btn ${mode === 'refund' ? 'btn-secondary' : 'btn-primary'}`} disabled={Boolean(disabledReason)}>
               {mode === 'refund'
                 ? 'Confirmar reembolso'
                 : isCardPayment && cardMode === CARD_PAYMENT_MODES.terminal

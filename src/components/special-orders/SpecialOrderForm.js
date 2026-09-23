@@ -48,7 +48,8 @@ function SpecialOrderForm({
   onCreateProduct,
   initialData = null,
   title = 'Nuevo pedido especial',
-  submitLabel = 'Guardar pedido'
+  submitLabel = 'Guardar pedido',
+  hideDeposit = false
 }) {
   const [customer, setCustomer] = useState({
     customerId: '',
@@ -620,23 +621,25 @@ function SpecialOrderForm({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input
-            label="Anticipo inicial"
-            type="number"
-            min="0"
-            step="0.01"
-            value={depositAmount}
-            onChange={(e) => setDepositAmount(e.target.value)}
-            error={errors.depositAmount}
-          />
-          <Select
-            label="Método del anticipo"
-            value={depositMethod}
-            onChange={(e) => setDepositMethod(e.target.value)}
-            options={PAYMENT_METHOD_OPTIONS}
-          />
-        </div>
+        {!hideDeposit && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Anticipo inicial"
+              type="number"
+              min="0"
+              step="0.01"
+              value={depositAmount}
+              onChange={(e) => setDepositAmount(e.target.value)}
+              error={errors.depositAmount}
+            />
+            <Select
+              label="Método del anticipo"
+              value={depositMethod}
+              onChange={(e) => setDepositMethod(e.target.value)}
+              options={PAYMENT_METHOD_OPTIONS}
+            />
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input
@@ -683,14 +686,18 @@ function SpecialOrderForm({
             <span>Total del pedido</span>
             <strong>{formatCurrency(totalAmount)}</strong>
           </div>
-          <div className="flex justify-between">
-            <span>Anticipo</span>
-            <strong>{formatCurrency(Number(depositAmount || 0))}</strong>
-          </div>
-          <div className="flex justify-between">
-            <span>Balance pendiente</span>
-            <strong className="text-amber-600">{formatCurrency(balanceDue)}</strong>
-          </div>
+          {!hideDeposit && (
+            <>
+              <div className="flex justify-between">
+                <span>Anticipo</span>
+                <strong>{formatCurrency(Number(depositAmount || 0))}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>Balance pendiente</span>
+                <strong className="text-amber-600">{formatCurrency(balanceDue)}</strong>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="flex justify-end gap-2 pt-2">

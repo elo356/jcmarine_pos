@@ -13,6 +13,7 @@ import { subscribeCategories } from '../services/categoryService';
 import { saveCustomer, subscribeCustomers } from '../services/customersService';
 import { subscribeProducts } from '../services/inventoryService';
 import { getSpinConfigurationState, processSpinCardPayment } from '../services/spinService';
+import { subscribeStoreStatusLogs } from '../services/storeStatusLogService';
 import {
   adjustInventoryForSpecialOrderItems,
   applySpecialOrderPayment,
@@ -64,6 +65,7 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [storeStatusLogs, setStoreStatusLogs] = useState([]);
   const [notification, setNotification] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTab, setSelectedTab] = useState('all');
@@ -127,6 +129,10 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
       },
       (error) => console.error('Error subscribing categories in special orders:', error)
     );
+    const unsubStoreStatusLogs = subscribeStoreStatusLogs(
+      (rows) => setStoreStatusLogs(rows || []),
+      (error) => console.error('Error subscribing store status logs in special orders:', error)
+    );
 
     return () => {
       unsubOrders();
@@ -134,8 +140,18 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
       unsubCustomers();
       unsubProducts();
       unsubCategories();
+      unsubStoreStatusLogs();
     };
   }, []);
+
+  const isStoreOpen = useMemo(() => {
+    const latestStoreLog = [...storeStatusLogs].sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    )[0] || null;
+    return Boolean(latestStoreLog && latestStoreLog.action === 'open');
+  }, [storeStatusLogs]);
+
+  const storeClosedMessage = isStoreOpen ? '' : 'La tienda debe estar abierta antes de cobrar.';
 
   const hydratedOrders = useMemo(
     () => rawOrders.map((order) =>
@@ -423,6 +439,11 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
 
 
   const handleCreateOrder = async ({ customer, items, depositAmount, depositMethod, expectedDate, internalNotes }) => {
+    if (depositAmount > 0 && !isStoreOpen) {
+      showNotification('error', storeClosedMessage);
+      return;
+    }
+
     const currentUser = getCurrentUserIdentity(user, profile, loadData().currentUser);
     const specialOrderId = generateId('special_order');
     const orderNumber = formatSpecialOrderNumber();
@@ -686,6 +707,11 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
     const order = paymentModalState.order;
     if (!order) return;
 
+    if (!isStoreOpen) {
+      showNotification('error', storeClosedMessage);
+      return;
+    }
+
     const isRefund = paymentModalState.mode === 'refund';
     const isCardPayment = method === 'card' && !isRefund;
     const useTerminal = isCardPayment && cardMode !== CARD_PAYMENT_MODES.manual;
@@ -822,6 +848,12 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
   const handleCancelOrder = async ({ reason, refundAmount }) => {
     const order = cancellationOrder;
     if (!order) return;
+
+    if (refundAmount > 0 && !isStoreOpen) {
+      showNotification('error', storeClosedMessage);
+      return;
+    }
+
     const currentUser = getCurrentUserIdentity(user, profile, loadData().currentUser);
 
     let updatedOrder = normalizeSpecialOrder({
@@ -1166,6 +1198,7 @@ function SpecialOrders({ onCreateProductRequested = () => {} }) {
         mode={paymentModalState.mode}
         spinConfiguration={spinConfiguration}
         spinConfigurationMessage={spinConfigurationMessage}
+        disabledReason={storeClosedMessage}
       />
 
       <SpecialOrderCancellationModal

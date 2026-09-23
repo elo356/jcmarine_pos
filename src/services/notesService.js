@@ -19,6 +19,16 @@ export const normalizeNote = (note = {}) => ({
   id: String(note.id || '').trim(),
   title: String(note.title || '').trim(),
   content: String(note.content || note.body || '').trim(),
+  template: ['inventory', 'lined', 'checklist'].includes(note.template) ? note.template : 'blank',
+  inventoryItems: Array.isArray(note.inventoryItems)
+    ? note.inventoryItems.map((item, index) => ({
+      id: String(item?.id || `inventory-${index}`),
+      sku: String(item?.sku || '').trim(),
+      quantity: String(item?.quantity ?? '').trim(),
+      price: String(item?.price ?? '').trim(),
+      completed: Boolean(item?.completed)
+    }))
+    : [],
   status: note.status === 'done' ? 'done' : 'pending',
   createdAt: normalizeDateValue(note.createdAt),
   updatedAt: normalizeDateValue(note.updatedAt),

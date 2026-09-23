@@ -81,6 +81,9 @@ export const buildTransactionRecord = ({
     transaction_id: saleId,
     date: createdAt,
     created_at: createdAt,
+    // Allows the sales history to find all receipts for a product without
+    // downloading and filtering the whole collection on the client.
+    productIds: [...new Set(cart.map((item) => item.id).filter(Boolean))],
     items: cart.map((item) => ({
       productId: item.id,
       name: item.name,

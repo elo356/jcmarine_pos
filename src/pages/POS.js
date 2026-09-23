@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Barcode, Plus, Minus, Trash2, ShoppingCart, CreditCard, Banknote, Smartphone, Landmark } from 'lucide-react';
+import { Search, Barcode, Plus, Minus, Trash2, ShoppingCart, CreditCard, Banknote, Smartphone, Landmark, Tag } from 'lucide-react';
 import {
   loadData,
   saveData,
@@ -98,6 +98,9 @@ function POS({
   const [pendingProductConfig, setPendingProductConfig] = useState(null);
   const [pendingSaleSize, setPendingSaleSize] = useState('');
   const [pendingSaleQuantity, setPendingSaleQuantity] = useState('1');
+  const [customPriceModalProduct, setCustomPriceModalProduct] = useState(null);
+  const [customPriceName, setCustomPriceName] = useState('');
+  const [customPriceAmount, setCustomPriceAmount] = useState('');
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [scannerStatus, setScannerStatus] = useState('Listo para escanear');
   const [scannerError, setScannerError] = useState('');
@@ -327,9 +330,14 @@ function POS({
 
     return products.filter((product) => {
       const matchesCategory = selectedCategory === 'all' || product.categoryId === selectedCategory;
-      return matchedIds.has(product.id) && matchesCategory;
+      return matchedIds.has(product.id) && matchesCategory && product.isCustomPriceItem !== true;
     });
   }, [products, debouncedSearch, selectedCategory]);
+
+  const customPriceProducts = useMemo(
+    () => products.filter((product) => product.isCustomPriceItem === true && product.active !== false),
+    [products]
+  );
 
   const posTotalPages = Math.max(1, Math.ceil(filteredProducts.length / POS_PAGE_SIZE));
   const visibleProducts = useMemo(() => {
@@ -467,6 +475,55 @@ function POS({
   };
 
   addToCartRef.current = addToCart;
+
+  const openCustomPriceModal = (product) => {
+    setCustomPriceModalProduct(product);
+    setCustomPriceName(product.name || 'Otro');
+    setCustomPriceAmount('');
+  };
+
+  const closeCustomPriceModal = () => {
+    setCustomPriceModalProduct(null);
+    setCustomPriceName('');
+    setCustomPriceAmount('');
+  };
+
+  const confirmCustomPriceItem = () => {
+    const product = customPriceModalProduct;
+    if (!product) return;
+
+    const normalizedName = customPriceName.trim();
+    const normalizedPrice = Number(customPriceAmount);
+
+    if (!normalizedName) {
+      showNotification('error', 'Escribe el nombre que saldrá en el recibo');
+      return;
+    }
+    if (!Number.isFinite(normalizedPrice) || normalizedPrice <= 0) {
+      showNotification('error', 'Precio inválido');
+      return;
+    }
+
+    const cartKey = `custom_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    setCart((prevCart) => [
+      ...prevCart,
+      {
+        id: '',
+        name: normalizedName,
+        price: normalizedPrice,
+        cartKey,
+        quantity: 1,
+        stock: 9999,
+        unitType: 'unit',
+        discount: DEFAULT_ITEM_DISCOUNT,
+        ivuStateEnabled: product.ivuStateEnabled !== false,
+        ivuMunicipalEnabled: product.ivuMunicipalEnabled !== false,
+        nonInventory: true
+      }
+    ]);
+    showNotification('success', `${normalizedName} agregado al carrito`);
+    closeCustomPriceModal();
+  };
 
   const updateQuantity = (cartKey, delta) => {
     setCart(prevCart => {
@@ -1489,6 +1546,21 @@ function POS({
               ))}
             </div>
 
+            {customPriceProducts.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-6">
+                {customPriceProducts.map((product) => (
+                  <button
+                    key={product.id}
+                    onClick={() => openCustomPriceModal(product)}
+                    className="flex items-center gap-2 rounded-lg border-2 border-dashed border-amber-400 bg-amber-50 px-4 py-2 font-medium text-amber-800 hover:bg-amber-100 transition-colors"
+                  >
+                    <Tag size={18} />
+                    {product.name}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Products Grid */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {visibleProducts.map((product) => (
@@ -2402,6 +2474,50 @@ function POS({
                 }}
                 className="btn btn-primary"
               >
+                Agregar
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(customPriceModalProduct)}
+        onClose={closeCustomPriceModal}
+        title="Cobrar precio personalizado"
+        size="md"
+      >
+        {customPriceModalProduct && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Nombre en el recibo</label>
+              <input
+                type="text"
+                value={customPriceName}
+                onChange={(e) => setCustomPriceName(e.target.value)}
+                className="input w-full"
+                autoFocus
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Precio a cobrar</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={customPriceAmount}
+                onChange={(e) => setCustomPriceAmount(e.target.value)}
+                placeholder="0.00"
+                className="input w-full"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4">
+              <button type="button" onClick={closeCustomPriceModal} className="btn btn-secondary">
+                Cancelar
+              </button>
+              <button type="button" onClick={confirmCustomPriceItem} className="btn btn-primary">
                 Agregar
               </button>
             </div>

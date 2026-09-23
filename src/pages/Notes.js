@@ -9,8 +9,69 @@ const EMPTY_FORM = {
   id: '',
   title: '',
   content: '',
+  template: 'blank',
+  inventoryItems: [],
+  checklistItems: [],
   status: 'pending'
 };
+
+const NOTE_TEMPLATES = [
+  { id: 'blank', label: 'En blanco', description: 'Nota normal sin formato.' },
+  { id: 'inventory', label: 'Inventario', description: 'SKU, cantidad y precio; se ordena por SKU.' },
+  { id: 'lined', label: 'Libreta', description: 'Hoja con líneas para apuntes.' },
+  { id: 'checklist', label: 'Lista de tareas', description: 'Lista rápida para pendientes.' }
+];
+
+const createInventoryItem = () => ({ id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, sku: '', quantity: '', price: '', completed: false });
+const createChecklistItem = () => ({ id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, text: '', completed: false });
+
+// La carpeta se ordena por los caracteres iniciales del SKU: 18, 25, 26,
+// 34110, 343576, 75 y luego 9. No se debe interpretar el SKU como un número.
+const skuSort = (left, right) => String(left.sku || '').localeCompare(
+  String(right.sku || ''),
+  undefined,
+  { numeric: false, sensitivity: 'base' }
+);
+
+const sortInventoryItems = (items = []) => [...items].sort((left, right) => {
+  if (!left.sku) return 1;
+  if (!right.sku) return -1;
+  return skuSort(left, right);
+});
+
+const parseInventoryItems = (content = '') => String(content || '').split('\n').map((line, index) => {
+  const cleaned = line.replace(/^\s*(sku|codigo)\s*\|.*$/i, '').trim();
+  if (!cleaned) return null;
+  const tokens = cleaned.replace(/[|,;]+/g, ' ').split(/\s+/).filter(Boolean);
+  const sku = tokens.shift() || '';
+  const quantityToken = tokens.find((token) => /^hay\d+$/i.test(token)) || tokens.find((token) => /^\d+$/.test(token)) || '';
+  const quantity = quantityToken ? quantityToken.replace(/^hay/i, '') : '';
+  const priceToken = [...tokens].reverse().find((token) => /^\$?\d+(?:[.,]\d{1,2})?$/.test(token)) || '';
+  const price = priceToken.replace('$', '').replace(',', '.');
+  return { id: `import-${index}-${sku}`, sku, quantity, price, completed: false };
+}).filter(Boolean);
+
+const getInventoryItems = (note = {}) => (
+  Array.isArray(note.inventoryItems) && note.inventoryItems.length > 0
+    ? note.inventoryItems
+    : parseInventoryItems(note.content)
+);
+
+const parseChecklistItems = (content = '') => String(content || '').split('\n').map((line, index) => {
+  const match = line.match(/^\s*(?:[-*]\s*)?\[([ xX])\]\s*(.*)$/);
+  const text = (match ? match[2] : line).trim();
+  return text ? { id: `task-${index}-${text.slice(0, 12)}`, text, completed: Boolean(match && match[1].toLowerCase() === 'x') } : null;
+}).filter(Boolean);
+
+const checklistToContent = (items = []) => items
+  .filter((item) => item.text.trim())
+  .map((item) => `- [${item.completed ? 'x' : ' '}] ${item.text.trim()}`)
+  .join('\n');
+
+const inventoryToContent = (items = []) => sortInventoryItems(items)
+  .filter((item) => item.sku || item.quantity || item.price)
+  .map((item) => `${item.sku || ''} | ${item.quantity || ''} | ${item.price ? `$${Number(item.price).toFixed(2)}` : ''}`.trim())
+  .join('\n');
 
 const NOTE_STATUS_OPTIONS = {
   pending: {
@@ -141,13 +202,22 @@ function Notes() {
       id: note.id,
       title: note.title,
       content: note.content,
+      template: note.template || 'blank',
+      inventoryItems: note.template === 'inventory' ? sortInventoryItems(getInventoryItems(note)) : [],
+      checklistItems: note.template === 'checklist' ? parseChecklistItems(note.content) : [],
       status: getNoteStatus(note)
     });
   };
 
   const handleSaveNote = async () => {
     const trimmedTitle = form.title.trim();
-    const trimmedContent = form.content.trim();
+    const inventoryItems = form.template === 'inventory' ? sortInventoryItems(form.inventoryItems) : [];
+    const content = form.template === 'inventory'
+      ? inventoryToContent(inventoryItems)
+      : form.template === 'checklist'
+        ? checklistToContent(form.checklistItems)
+        : form.content;
+    const trimmedContent = content.trim();
 
     if (!trimmedTitle && !trimmedContent) {
       showNotification('warning', 'Escribe un titulo o contenido para guardar la nota.');
@@ -162,6 +232,8 @@ function Notes() {
       id: noteId,
       title: trimmedTitle || 'Nota rapida',
       content: trimmedContent,
+      template: form.template,
+      inventoryItems,
       status: getNoteStatus(form),
       createdAt: existingNote?.createdAt,
       createdBy: existingNote?.createdBy || user?.uid || '',
@@ -175,6 +247,9 @@ function Notes() {
       id: saved.id,
       title: saved.title,
       content: saved.content,
+      template: saved.template || 'blank',
+      inventoryItems: saved.template === 'inventory' ? sortInventoryItems(getInventoryItems(saved)) : [],
+      checklistItems: saved.template === 'checklist' ? parseChecklistItems(saved.content) : [],
       status: getNoteStatus(saved)
     });
     setIsSaving(false);
@@ -242,6 +317,9 @@ function Notes() {
       id: result.id,
       title: result.title,
       content: result.content,
+      template: result.template || 'blank',
+      inventoryItems: result.template === 'inventory' ? sortInventoryItems(getInventoryItems(result)) : [],
+      checklistItems: result.template === 'checklist' ? parseChecklistItems(result.content) : [],
       status: getNoteStatus(result)
     });
     window.requestAnimationFrame(() => noteEditorRef.current?.focus());
@@ -473,6 +551,28 @@ function Notes() {
 
           <div className="space-y-4">
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Plantilla</label>
+              <select
+                value={form.template}
+                onChange={(e) => {
+                  const template = e.target.value;
+                  setForm((current) => ({
+                    ...current,
+                    template,
+                    inventoryItems: template === 'inventory'
+                      ? (current.inventoryItems.length ? current.inventoryItems : [...parseInventoryItems(current.content), createInventoryItem()])
+                      : current.inventoryItems,
+                    checklistItems: template === 'checklist'
+                      ? (current.checklistItems.length ? current.checklistItems : [...parseChecklistItems(current.content), createChecklistItem()])
+                      : current.checklistItems
+                  }));
+                }}
+                className="input w-full"
+              >
+                {NOTE_TEMPLATES.map((template) => <option key={template.id} value={template.id}>{template.label} — {template.description}</option>)}
+              </select>
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Titulo</label>
               <input
                 type="text"
@@ -483,16 +583,58 @@ function Notes() {
               />
             </div>
 
-            <div>
+            {form.template === 'inventory' ? (
+              <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-800">Productos de inventario</label>
+                    <p className="text-xs text-gray-500">Escribe SKU, cantidad y precio. Las filas se acomodan solas por SKU.</p>
+                  </div>
+                  <button type="button" className="btn btn-secondary" onClick={() => setForm((current) => ({ ...current, inventoryItems: sortInventoryItems(current.inventoryItems) }))}>
+                    Ordenar SKU
+                  </button>
+                </div>
+                <div className="max-h-[32rem] overflow-auto pr-1">
+                  <div className="min-w-[38rem] space-y-2">
+                    <div className="grid grid-cols-[minmax(12rem,1fr)_8rem_9rem_2.75rem_2.75rem] gap-2 px-1 text-xs font-semibold uppercase tracking-wide text-gray-500"><span>SKU</span><span>Cantidad</span><span>Precio</span><span className="text-center">Carpeta</span><span /></div>
+                    {form.inventoryItems.map((item) => (
+                      <div key={item.id} className={`grid grid-cols-[minmax(12rem,1fr)_8rem_9rem_2.75rem_2.75rem] gap-2 rounded-lg ${item.completed ? 'bg-green-50/70' : ''}`}>
+                        {['sku', 'quantity', 'price'].map((field) => <input key={field} type={field === 'price' || field === 'quantity' ? 'number' : 'text'} min={field === 'quantity' ? '0' : undefined} step={field === 'price' ? '0.01' : '1'} value={item[field]} placeholder={field === 'sku' ? '18-0412' : field === 'quantity' ? '8' : '8.99'} onChange={(e) => setForm((current) => ({ ...current, inventoryItems: current.inventoryItems.map((row) => row.id === item.id ? { ...row, [field]: e.target.value } : row) }))} onBlur={() => setForm((current) => ({ ...current, inventoryItems: sortInventoryItems(current.inventoryItems) }))} className="input w-full" />)}
+                        <button type="button" aria-label={item.completed ? 'Marcar como pendiente' : 'Marcar como puesto en carpeta'} title={item.completed ? 'Quitar marca de carpeta' : 'Marcar como puesto en carpeta'} className={`rounded-lg border transition ${item.completed ? 'border-green-300 bg-green-500 text-white' : 'border-gray-200 bg-white text-gray-400 hover:border-green-300 hover:text-green-600'}`} onClick={() => setForm((current) => ({ ...current, inventoryItems: current.inventoryItems.map((row) => row.id === item.id ? { ...row, completed: !row.completed } : row) }))}><CheckCircle2 size={19} className="mx-auto" /></button>
+                        <button type="button" aria-label="Eliminar producto" className="rounded-lg border border-red-200 text-red-600 hover:bg-red-50" onClick={() => setForm((current) => ({ ...current, inventoryItems: current.inventoryItems.filter((row) => row.id !== item.id) }))}><Trash2 size={16} className="mx-auto" /></button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <button type="button" className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-primary-700 hover:text-primary-800" onClick={() => setForm((current) => ({ ...current, inventoryItems: sortInventoryItems([...current.inventoryItems, createInventoryItem()]) }))}><Plus size={16} />Agregar producto</button>
+              </div>
+            ) : form.template === 'checklist' ? (
+              <div className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-4 shadow-sm">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div><label className="block text-sm font-semibold text-gray-800">Lista de tareas</label><p className="text-xs text-gray-500">Marca cada tarea al terminarla.</p></div>
+                  <span className="rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">{form.checklistItems.filter((item) => item.completed).length} / {form.checklistItems.filter((item) => item.text.trim()).length} listas</span>
+                </div>
+                <div className="max-h-[32rem] space-y-2 overflow-y-auto pr-1">
+                  {form.checklistItems.map((item) => (
+                    <div key={item.id} className={`flex items-center gap-3 rounded-xl border p-2 transition ${item.completed ? 'border-green-200 bg-green-50' : 'border-white bg-white shadow-sm'}`}>
+                      <button type="button" aria-label={item.completed ? 'Marcar tarea pendiente' : 'Marcar tarea completada'} className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border-2 transition ${item.completed ? 'border-green-500 bg-green-500 text-white' : 'border-gray-300 bg-white text-transparent hover:border-violet-400'}`} onClick={() => setForm((current) => ({ ...current, checklistItems: current.checklistItems.map((row) => row.id === item.id ? { ...row, completed: !row.completed } : row) }))}><CheckCircle2 size={19} /></button>
+                      <input type="text" value={item.text} placeholder="Escribe una tarea..." onChange={(e) => setForm((current) => ({ ...current, checklistItems: current.checklistItems.map((row) => row.id === item.id ? { ...row, text: e.target.value } : row) }))} className={`min-w-0 flex-1 border-0 bg-transparent px-1 py-2 text-sm outline-none ${item.completed ? 'text-green-800 line-through' : 'text-gray-800'}`} />
+                      <button type="button" aria-label="Eliminar tarea" className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" onClick={() => setForm((current) => ({ ...current, checklistItems: current.checklistItems.filter((row) => row.id !== item.id) }))}><Trash2 size={16} /></button>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" className="mt-4 inline-flex items-center gap-2 rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-violet-700" onClick={() => setForm((current) => ({ ...current, checklistItems: [...current.checklistItems, createChecklistItem()] }))}><Plus size={16} />Agregar tarea</button>
+              </div>
+            ) : <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Nota</label>
               <textarea
                 ref={noteEditorRef}
                 value={form.content}
                 onChange={(e) => setForm((current) => ({ ...current, content: e.target.value }))}
                 placeholder="Escribe aqui los detalles importantes..."
-                className="input min-h-[22rem] w-full resize-y"
+                className={`input min-h-[22rem] w-full resize-y ${form.template === 'lined' ? 'leading-8 [background-image:repeating-linear-gradient(to_bottom,transparent,transparent_31px,#dbeafe_32px)]' : ''}`}
               />
-            </div>
+            </div>}
           </div>
 
           <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-600">

@@ -1,4 +1,4 @@
-import { collection, doc, onSnapshot, orderBy, query, runTransaction, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, documentId, endAt, getDoc, getDocs, limit, onSnapshot, orderBy, query, runTransaction, setDoc, startAfter, startAt, where, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { getNetSaleTotal, normalizeSaleRefund, normalizeSaleStatus } from '../utils/salesUtils';
 import { mergeWeeklyCachedSales, syncWeeklySalesCache, upsertWeeklyCachedSale } from './weeklySalesCacheService';
@@ -6,6 +6,86 @@ import { generateId } from '../data/demoData';
 import { buildInventoryLogEntry, INVENTORY_MOVEMENT_TYPES } from '../utils/inventoryLogUtils';
 
 const salesCol = collection(db, 'sales');
+const inventoryLogsCol = collection(db, 'inventoryLogs');
+
+const sortSalesByDate = (sales = []) => [...sales].sort(
+  (a, b) => new Date(b.date || b.created_at || 0) - new Date(a.date || a.created_at || 0)
+);
+
+// The history view must not subscribe to the entire sales collection.  A cursor
+// is a Firestore document snapshot returned by the previous page.
+export const getSalesPage = async ({ pageSize = 25, cursor = null } = {}) => {
+  const constraints = [orderBy('date', 'desc'), limit(pageSize)];
+  if (cursor) constraints.splice(1, 0, startAfter(cursor));
+
+  const snapshot = await getDocs(query(salesCol, ...constraints));
+  return {
+    sales: snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })),
+    cursor: snapshot.docs[snapshot.docs.length - 1] || null,
+    hasMore: snapshot.docs.length === pageSize
+  };
+};
+
+export const findSalesByReceipt = async (receiptNumber, maxResults = 50) => {
+  const normalized = String(receiptNumber || '').trim().replace(/^#/, '');
+  if (!normalized) return [];
+
+  // Receipts display the timestamp portion of ids such as sale_1720000000000_xxx.
+  // Query the document id prefix, so an old receipt can be found without reading
+  // every sale first.
+  const prefix = normalized.startsWith('sale_') ? normalized : `sale_${normalized}`;
+  const snapshot = await getDocs(query(
+    salesCol,
+    orderBy(documentId()),
+    startAt(prefix),
+    endAt(`${prefix}\uf8ff`),
+    limit(maxResults)
+  ));
+
+  return sortSalesByDate(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+};
+
+export const findSalesByProductIds = async (productIds = [], maxResults = 100) => {
+  const ids = [...new Set(productIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+
+  const results = await Promise.all(ids.map(async (productId) => {
+    // productIds is written on current sales. It is deliberately a flat array so
+    // Firestore can answer this lookup with array-contains.
+    const indexed = await getDocs(query(
+      salesCol,
+      where('productIds', 'array-contains', productId),
+      limit(maxResults)
+    ));
+    return indexed.docs.map((entry) => ({ id: entry.id, ...entry.data() }));
+  }));
+
+  const indexedSales = results.flat();
+
+  // Older receipts did not have productIds. Inventory movements are already
+  // indexed by productId, so use them as a small on-demand legacy lookup rather
+  // than loading the full sales history.
+  const legacyLogs = await Promise.all(ids.map(async (productId) => {
+    const snapshot = await getDocs(query(
+      inventoryLogsCol,
+      where('productId', '==', productId),
+      limit(maxResults)
+    ));
+    return snapshot.docs.map((entry) => entry.data());
+  }));
+  const saleIds = [...new Set(legacyLogs.flat()
+    .filter((entry) => entry.type === 'sale' && entry.reference)
+    .map((entry) => entry.reference))]
+    .slice(0, maxResults);
+  const legacySales = await Promise.all(saleIds.map(async (saleId) => {
+    const snapshot = await getDoc(doc(db, 'sales', saleId));
+    return snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null;
+  }));
+
+  return sortSalesByDate(
+    [...new Map([...indexedSales, ...legacySales.filter(Boolean)].map((sale) => [sale.id, sale])).values()]
+  );
+};
 
 export const subscribeSales = (onData, onError) => {
   const q = query(salesCol, orderBy('date', 'desc'));

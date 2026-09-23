@@ -14,6 +14,7 @@ import {
   ClipboardList,
   History,
   FileText,
+  FileSignature,
   Settings,
   Menu,
   X,
@@ -34,6 +35,7 @@ import Employees from './pages/Employees';
 import Reports from './pages/Reports';
 import Printers from './pages/Printers';
 import SpecialOrders from './pages/SpecialOrders';
+import Quotes from './pages/Quotes';
 import FinancePage from './pages/Finance';
 import SettingsPage from './pages/Settings';
 import Login from './pages/Login';
@@ -56,6 +58,7 @@ const SIDEBAR_ITEMS = [
   { id: 'sales', label: 'Ventas', icon: DollarSign },
   { id: 'notes', label: 'Notas', icon: ClipboardList },
   { id: 'special_orders', label: 'Pedidos especiales', icon: ClipboardList },
+  { id: 'quotes', label: 'Cotización', icon: FileSignature },
   { id: 'inventory', label: 'Inventario', icon: Warehouse },
   { id: 'inventory_logs', label: 'Bitacora de inventario', icon: History },
   { id: 'shifts', label: 'Turnos', icon: Clock },
@@ -259,6 +262,15 @@ function App() {
       case 'special_orders':
         return (
           <SpecialOrders
+            onCreateProductRequested={(draft) => {
+              setPendingProductDraft(draft);
+              setCurrentPage('products');
+            }}
+          />
+        );
+      case 'quotes':
+        return (
+          <Quotes
             onCreateProductRequested={(draft) => {
               setPendingProductDraft(draft);
               setCurrentPage('products');
