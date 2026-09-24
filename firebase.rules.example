@@ -99,6 +99,34 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Scanner virtual: la computadora (host) crea la sesion con un codigo de 6
+    // digitos, el celular la reclama mientras esta en 'waiting' y solo el celular
+    // vinculado puede enviar lecturas. Solo el host las lee y las borra.
+    function scannerSession(code) {
+      return get(/databases/$(database)/documents/scannerSessions/$(code)).data;
+    }
+
+    match /scannerSessions/{code} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.hostUid == request.auth.uid;
+      allow update: if isSignedIn() &&
+        request.resource.data.hostUid == resource.data.hostUid &&
+        (
+          resource.data.hostUid == request.auth.uid ||
+          (resource.data.status == 'waiting' && request.resource.data.pairedUid == request.auth.uid) ||
+          resource.data.pairedUid == request.auth.uid
+        );
+      allow delete: if isSignedIn() && resource.data.hostUid == request.auth.uid;
+
+      match /scans/{scanId} {
+        allow read, delete: if isSignedIn() && scannerSession(code).hostUid == request.auth.uid;
+        allow create: if isSignedIn() &&
+          scannerSession(code).status == 'paired' &&
+          scannerSession(code).pairedUid == request.auth.uid &&
+          request.resource.data.uid == request.auth.uid;
+      }
+    }
+
     match /_meta/{docId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isAdmin();

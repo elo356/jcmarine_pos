@@ -19,7 +19,8 @@ import {
   Menu,
   X,
   LogOut,
-  User
+  User,
+  ScanBarcode
 } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import POS from './pages/POS';
@@ -38,8 +39,11 @@ import SpecialOrders from './pages/SpecialOrders';
 import Quotes from './pages/Quotes';
 import FinancePage from './pages/Finance';
 import SettingsPage from './pages/Settings';
+import MobileScanner from './pages/MobileScanner';
 import Login from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
+import { useVirtualScanner } from './contexts/VirtualScannerContext';
+import useIsMobileDevice from './hooks/useIsMobileDevice';
 import { startSessionPresence } from './services/systemPresenceService';
 import { useActiveSystemsCount } from './hooks/useActiveSystemsCount';
 import { useWeeklyShiftAutoClose } from './hooks/useWeeklyShiftAutoClose';
@@ -51,7 +55,10 @@ import { subscribePendingSyncQueue, syncPendingQueue } from './services/pendingS
 import { getCachedSystemSettings, subscribeSystemSettings } from './services/settingsService';
 import { checkAndRunAutoBackup } from './services/backupService';
 
+const IS_ELECTRON = typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent);
+
 const SIDEBAR_ITEMS = [
+  { id: 'mobile_scanner', label: 'Scanner', icon: ScanBarcode },
   { id: 'dashboard', label: 'Panel', icon: LayoutDashboard },
   { id: 'pos', label: 'Punto de Venta', icon: ShoppingCart },
   { id: 'products', label: 'Productos', icon: Package },
@@ -81,6 +88,10 @@ function App() {
   const [firestoreStatus, setFirestoreStatus] = useState({ ok: true, checking: true, error: null });
   const [pendingSyncQueue, setPendingSyncQueue] = useState([]);
   const activeSystemsCount = useActiveSystemsCount(profile?.role === 'admin');
+  const isMobileDevice = useIsMobileDevice();
+  // El modo scanner solo aparece en la version web abierta desde un celular.
+  const canUseMobileScanner = !IS_ELECTRON && isMobileDevice;
+  const { sessionCode: virtualScannerCode, isPaired: virtualScannerPaired } = useVirtualScanner();
   useWeeklyShiftAutoClose(Boolean(user));
 
   const allowedPages = useMemo(() => {
@@ -90,6 +101,7 @@ function App() {
 
   const visibleItems = useMemo(
     () => SIDEBAR_ITEMS.filter((item) => {
+      if (item.id === 'mobile_scanner') return canUseMobileScanner;
       const hasAccess = item.id === 'store'
         ? allowedPages.includes('store') || allowedPages.includes('shifts')
         : item.id === 'online_store'
@@ -101,11 +113,13 @@ function App() {
           : allowedPages.includes(item.id);
       return hasAccess && (!item.adminOnly || profile?.role === 'admin');
     }),
-    [allowedPages, profile?.role]
+    [allowedPages, profile?.role, canUseMobileScanner]
   );
 
   useEffect(() => {
-    const hasAccessToCurrentPage = currentPage === 'store'
+    const hasAccessToCurrentPage = currentPage === 'mobile_scanner'
+      ? canUseMobileScanner
+      : currentPage === 'store'
       ? allowedPages.includes('store') || allowedPages.includes('shifts')
       : currentPage === 'online_store'
         ? allowedPages.includes('online_store') || allowedPages.includes('store')
@@ -117,7 +131,7 @@ function App() {
     if (!hasAccessToCurrentPage) {
       setCurrentPage(allowedPages[0] || 'dashboard');
     }
-  }, [allowedPages, currentPage, profile?.role]);
+  }, [allowedPages, currentPage, profile?.role, canUseMobileScanner]);
 
   useEffect(() => {
     if (!user || !profile) return () => {};
@@ -232,6 +246,8 @@ function App() {
 
   const renderPage = () => {
     switch (currentPage) {
+      case 'mobile_scanner':
+        return <MobileScanner />;
       case 'dashboard':
         return <Dashboard />;
       case 'pos':
@@ -452,6 +468,16 @@ function App() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
+                {virtualScannerCode && (
+                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium ${
+                    virtualScannerPaired
+                      ? 'bg-green-50 border-green-200 text-green-700'
+                      : 'bg-amber-50 border-amber-200 text-amber-800'
+                  }`}>
+                    <ScanBarcode size={16} />
+                    {virtualScannerPaired ? 'Scanner virtual conectado' : `Scanner virtual: ${virtualScannerCode}`}
+                  </div>
+                )}
                 {profile?.role === 'admin' && (
                   <div className="px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm font-medium">
                     Sistemas abiertos: {activeSystemsCount}

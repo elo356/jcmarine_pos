@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { VIRTUAL_SCAN_EVENT } from '../services/virtualScannerService';
 
 const isPrintableKey = (event) => event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
 
@@ -98,10 +99,22 @@ function useScannerKeyboardInput({
       scheduleFlush();
     };
 
+    // Lecturas que llegan desde el celular (scanner virtual) se tratan igual que
+    // una lectura del scanner USB.
+    const handleVirtualScan = (event) => {
+      const value = String(event.detail?.barcode || '').trim();
+      if (!value) return;
+      clearBuffer(false);
+      onBufferChangeRef.current?.(value);
+      onScanRef.current?.(value);
+    };
+
     document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener(VIRTUAL_SCAN_EVENT, handleVirtualScan);
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener(VIRTUAL_SCAN_EVENT, handleVirtualScan);
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current);
         idleTimerRef.current = null;

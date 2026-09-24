@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Archive, Clock, Save, ShieldCheck } from 'lucide-react';
+import { Archive, Clock, Save, ScanBarcode, ShieldCheck } from 'lucide-react';
 import Notification from '../components/Notification';
 import RolesPermissions from './RolesPermissions';
 import BackupSettings from '../components/BackupSettings';
+import VirtualScannerSettings from '../components/VirtualScannerSettings';
 import {
   DEFAULT_SYSTEM_SETTINGS,
   saveSystemSettings,
@@ -139,9 +140,21 @@ function SettingsPage() {
           <ShieldCheck size={18} />
           Roles y permisos
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveSection('scanner')}
+          className={`btn ${activeSection === 'scanner' ? 'btn-primary' : 'btn-secondary'}`}
+        >
+          <ScanBarcode size={18} />
+          Scanner virtual
+        </button>
       </div>
 
-      {activeSection === 'backup' ? (
+      {activeSection === 'scanner' ? (
+        <div className="card p-6">
+          <VirtualScannerSettings />
+        </div>
+      ) : activeSection === 'backup' ? (
         <div className="card p-6 space-y-6">
           <BackupSettings
             backup={settings.backup}
