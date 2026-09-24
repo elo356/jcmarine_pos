@@ -14,6 +14,34 @@ const VirtualScannerContext = createContext(null);
 
 const storageKey = (uid) => `pos:virtual-scanner-session:${uid}`;
 
+const TYPEABLE_INPUT_TYPES = ['text', 'search', 'number', 'tel', ''];
+
+const isTypeableField = (element) => {
+  if (!element || element.disabled || element.readOnly) return false;
+  if (element.tagName === 'TEXTAREA') return true;
+  return element.tagName === 'INPUT' && TYPEABLE_INPUT_TYPES.includes((element.getAttribute('type') || '').toLowerCase());
+};
+
+const isVisible = (element) => Boolean(element.offsetParent || element.getClientRects().length);
+
+// Si ninguna pantalla procesa la lectura (POS, modal de producto...), se comporta
+// como el scanner USB: escribe en el campo enfocado o, si no hay, en el buscador
+// visible de la pagina.
+const typeIntoPageField = (barcode) => {
+  const focused = document.activeElement;
+  const target = isTypeableField(focused)
+    ? focused
+    : Array.from(document.querySelectorAll('input[placeholder*="uscar"]'))
+      .find((element) => isTypeableField(element) && isVisible(element));
+  if (!target) return;
+
+  const prototype = target.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+  const setValue = Object.getOwnPropertyDescriptor(prototype, 'value').set;
+  setValue.call(target, barcode);
+  target.dispatchEvent(new Event('input', { bubbles: true }));
+  target.focus({ preventScroll: true });
+};
+
 const readStoredCode = (uid) => {
   try {
     return uid ? localStorage.getItem(storageKey(uid)) : null;
@@ -77,7 +105,11 @@ export const VirtualScannerProvider = ({ children }) => {
       sessionCode,
       (barcode) => {
         setLastScan({ barcode, at: Date.now() });
-        window.dispatchEvent(new CustomEvent(VIRTUAL_SCAN_EVENT, { detail: { barcode } }));
+        const handled = !window.dispatchEvent(new CustomEvent(VIRTUAL_SCAN_EVENT, {
+          detail: { barcode },
+          cancelable: true
+        }));
+        if (!handled) typeIntoPageField(barcode);
       },
       (subscribeError) => console.error('Error subscribing to virtual scans:', subscribeError)
     );

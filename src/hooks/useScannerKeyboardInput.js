@@ -104,6 +104,8 @@ function useScannerKeyboardInput({
     const handleVirtualScan = (event) => {
       const value = String(event.detail?.barcode || '').trim();
       if (!value) return;
+      // Marca la lectura como atendida para que no se escriba tambien en el campo enfocado.
+      event.preventDefault();
       clearBuffer(false);
       onBufferChangeRef.current?.(value);
       onScanRef.current?.(value);
